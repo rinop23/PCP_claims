@@ -640,57 +640,66 @@ def create_docx_report(summary, agent, docx_path):
 
         doc.add_paragraph("")
 
-    # Detailed Claim Analysis
-    doc.add_heading('Detailed Claim Analysis', level=1)
+    # Flagged Claims (NOT Eligible) - Only show claims that need attention
+    doc.add_heading('⚠️ Flagged Claims - Requires Review', level=1)
 
-    # Create summary table
-    table = doc.add_table(rows=1, cols=6)
-    table.style = 'Light Grid Accent 1'
-    hdr_cells = table.rows[0].cells
-    hdr_cells[0].text = 'Claim ID'
-    hdr_cells[1].text = 'Claimant'
-    hdr_cells[2].text = 'Defendant'
-    hdr_cells[3].text = 'Claim Amount'
-    hdr_cells[4].text = 'Eligible'
-    hdr_cells[5].text = 'Recommendation'
+    # Filter for non-eligible claims only
+    flagged_claims = {cid: result for cid, result in eligibility.items() if not result.get('eligible')}
 
-    for claim_id, result in eligibility.items():
-        claim = agent.claims_data.get(claim_id)
-        if claim:
-            row_cells = table.add_row().cells
-            row_cells[0].text = claim_id
-            row_cells[1].text = claim.claimant_name
-            row_cells[2].text = claim.defendant
-            row_cells[3].text = f"£{claim.claim_amount:,.2f}"
-            row_cells[4].text = '✓' if result.get('eligible') else '✗'
-            row_cells[5].text = result.get('recommendation', '')[:30] + '...'
+    if flagged_claims:
+        doc.add_paragraph(f"Total Flagged Claims: {len(flagged_claims)}")
+        doc.add_paragraph("The following claims DO NOT meet FCA eligibility criteria and should be reviewed:")
+        doc.add_paragraph("")
 
-    doc.add_paragraph("")
+        # Create summary table for flagged claims
+        table = doc.add_table(rows=1, cols=6)
+        table.style = 'Light Grid Accent 1'
+        hdr_cells = table.rows[0].cells
+        hdr_cells[0].text = 'Claim ID'
+        hdr_cells[1].text = 'Claimant'
+        hdr_cells[2].text = 'Defendant'
+        hdr_cells[3].text = 'Claim Amount'
+        hdr_cells[4].text = 'Status'
+        hdr_cells[5].text = 'Issue'
 
-    # Individual claim details
-    doc.add_heading('Individual Claim Details', level=2)
-    for claim_id, result in eligibility.items():
-        doc.add_heading(f"Claim ID: {claim_id}", level=3)
-        claim = agent.claims_data.get(claim_id)
-        if claim:
-            doc.add_paragraph(f"Claimant: {claim.claimant_name}")
-            doc.add_paragraph(f"Defendant: {claim.defendant}")
-            doc.add_paragraph(f"Claim Amount: £{claim.claim_amount:,.2f}")
-            doc.add_paragraph(f"Funded Amount: £{claim.funded_amount:,.2f}")
-            doc.add_paragraph(f"Potential Return: £{claim.claim_amount - claim.funded_amount:,.2f}")
+        for claim_id, result in flagged_claims.items():
+            claim = agent.claims_data.get(claim_id)
+            if claim:
+                row_cells = table.add_row().cells
+                row_cells[0].text = claim_id
+                row_cells[1].text = claim.claimant_name
+                row_cells[2].text = claim.defendant
+                row_cells[3].text = f"£{claim.claim_amount:,.2f}"
+                row_cells[4].text = 'NOT ELIGIBLE'
+                # Get main reason from recommendation
+                row_cells[5].text = result.get('recommendation', 'Review required')[:50]
 
-        doc.add_paragraph(f"Eligible: {'✓ Yes' if result.get('eligible') else '✗ No'}")
-        doc.add_paragraph(f"Recommendation: {result.get('recommendation')}")
+        doc.add_paragraph("")
 
-        doc.add_paragraph("Assessment Details:")
-        for reason in result.get('reasons', []):
-            doc.add_paragraph(f"  • {reason}", style='List Bullet')
+        # Detailed flagged claim information
+        doc.add_heading('Detailed Issue Analysis', level=2)
+        for claim_id, result in flagged_claims.items():
+            doc.add_heading(f"❌ Claim ID: {claim_id}", level=3)
+            claim = agent.claims_data.get(claim_id)
+            if claim:
+                doc.add_paragraph(f"Claimant: {claim.claimant_name}")
+                doc.add_paragraph(f"Defendant: {claim.defendant}")
+                doc.add_paragraph(f"Claim Amount: £{claim.claim_amount:,.2f}")
 
-        if result.get('warnings'):
-            doc.add_paragraph("Warnings:")
-            for warning in result.get('warnings', []):
-                doc.add_paragraph(f"  ⚠ {warning}", style='List Bullet')
+            doc.add_paragraph(f"Recommendation: {result.get('recommendation')}")
 
+            doc.add_paragraph("Reasons for Flagging:")
+            for reason in result.get('reasons', []):
+                doc.add_paragraph(f"  • {reason}", style='List Bullet')
+
+            if result.get('warnings'):
+                doc.add_paragraph("Additional Warnings:")
+                for warning in result.get('warnings', []):
+                    doc.add_paragraph(f"  ⚠ {warning}", style='List Bullet')
+
+            doc.add_paragraph("")
+    else:
+        doc.add_paragraph("✅ No flagged claims - All claims meet FCA eligibility criteria")
         doc.add_paragraph("")
 
     # Footer
