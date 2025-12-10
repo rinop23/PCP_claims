@@ -117,6 +117,19 @@ class PCPFundingAgent:
 
     def get_fca_and_docs_knowledge(self) -> str:
         """Aggregate text from all FCA and DOCS PDFs for compliance/contextual analysis."""
+        # Try to get from database first (for production)
+        try:
+            import streamlit as st
+            if hasattr(st, 'connection'):
+                conn = st.connection('legal_docs_db', type='sql')
+                df = conn.query('SELECT document_name, content FROM legal_documents')
+                if not df.empty:
+                    print(f"[Info] Loaded {len(df)} documents from database")
+                    return "\n\n".join(df['content'].tolist())
+        except Exception as e:
+            print(f"[Info] Database not available, using local files: {e}")
+
+        # Fallback to local files (for development)
         all_text = []
         for path in self.fca_docs_paths:
             if os.path.exists(path):
