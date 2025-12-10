@@ -10,6 +10,11 @@ from docx import Document
 import os
 from datetime import datetime
 import hashlib
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend for server environments
+import tempfile
+from docx.shared import Inches
 
 # Page configuration
 st.set_page_config(
@@ -469,10 +474,7 @@ def create_financial_overview(summary):
 
 
 def create_docx_report(summary, agent, docx_path):
-    """Create comprehensive DOCX report with embedded charts"""
-    import tempfile
-    from docx.shared import Inches
-
+    """Create comprehensive DOCX report with embedded charts using matplotlib"""
     doc = Document()
 
     # Title
@@ -521,22 +523,23 @@ def create_docx_report(summary, agent, docx_path):
         doc.add_paragraph(f"Eligibility Rate: {(eligible_count/len(eligibility)*100):.1f}%")
         doc.add_paragraph("")
 
-        # Generate and embed eligibility pie chart
+        # Generate and embed eligibility pie chart using matplotlib
         try:
             statuses = ["Eligible" if v.get('eligible') else "Not Eligible" for v in eligibility.values()]
             status_counts = pd.Series(statuses).value_counts()
 
-            fig_pie = px.pie(
-                values=status_counts.values,
-                names=status_counts.index,
-                title="FCA Eligibility Status Distribution",
-                color_discrete_sequence=['#28a745', '#dc3545']
-            )
-            fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+            # Create matplotlib pie chart
+            fig, ax = plt.subplots(figsize=(8, 6))
+            colors = ['#28a745', '#dc3545']
+            ax.pie(status_counts.values, labels=status_counts.index, autopct='%1.1f%%',
+                   colors=colors, startangle=90)
+            ax.set_title('FCA Eligibility Status Distribution', fontsize=14, fontweight='bold')
+            plt.axis('equal')
 
             # Save to temp file
             temp_img = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
-            fig_pie.write_image(temp_img.name, width=800, height=600)
+            plt.savefig(temp_img.name, dpi=150, bbox_inches='tight')
+            plt.close()
 
             # Add to document
             doc.add_heading('Eligibility Distribution', level=2)
@@ -549,23 +552,25 @@ def create_docx_report(summary, agent, docx_path):
             doc.add_paragraph(f"[Chart generation skipped: {str(e)}]")
             doc.add_paragraph("")
 
-        # Generate and embed recommendations bar chart
+        # Generate and embed recommendations bar chart using matplotlib
         try:
             recommendations = [v.get('recommendation', '').split('-')[0].strip() for v in eligibility.values()]
             rec_counts = pd.Series(recommendations).value_counts()
 
-            fig_bar = px.bar(
-                x=rec_counts.index,
-                y=rec_counts.values,
-                title="Recommendation Distribution",
-                labels={'x': 'Recommendation', 'y': 'Count'},
-                color=rec_counts.values,
-                color_continuous_scale='Blues'
-            )
+            # Create matplotlib bar chart
+            fig, ax = plt.subplots(figsize=(8, 6))
+            bars = ax.bar(range(len(rec_counts)), rec_counts.values, color='#1f77b4')
+            ax.set_xticks(range(len(rec_counts)))
+            ax.set_xticklabels(rec_counts.index, rotation=45, ha='right')
+            ax.set_xlabel('Recommendation')
+            ax.set_ylabel('Count')
+            ax.set_title('Recommendation Distribution', fontsize=14, fontweight='bold')
+            plt.tight_layout()
 
             # Save to temp file
             temp_img = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
-            fig_bar.write_image(temp_img.name, width=800, height=600)
+            plt.savefig(temp_img.name, dpi=150, bbox_inches='tight')
+            plt.close()
 
             # Add to document
             doc.add_heading('Recommendation Summary', level=2)
@@ -586,23 +591,23 @@ def create_docx_report(summary, agent, docx_path):
         doc.add_paragraph(f"Total Bundles: {len(bundles)}")
         doc.add_paragraph("")
 
-        # Generate funding chart
+        # Generate funding chart using matplotlib
         try:
             df_bundles = pd.DataFrame(bundles)
 
-            fig_funding = px.bar(
-                df_bundles,
-                x='bundle_id',
-                y='funding_drawn',
-                title="Funding Drawn by Bundle",
-                labels={'funding_drawn': 'Funding (£)', 'bundle_id': 'Bundle ID'},
-                color='funding_drawn',
-                color_continuous_scale='Viridis'
-            )
+            # Create matplotlib bar chart
+            fig, ax = plt.subplots(figsize=(10, 6))
+            bars = ax.bar(df_bundles['bundle_id'], df_bundles['funding_drawn'], color='#2ca02c')
+            ax.set_xlabel('Bundle ID')
+            ax.set_ylabel('Funding (£)')
+            ax.set_title('Funding Drawn by Bundle', fontsize=14, fontweight='bold')
+            plt.xticks(rotation=45, ha='right')
+            plt.tight_layout()
 
             # Save to temp file
             temp_img = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
-            fig_funding.write_image(temp_img.name, width=800, height=600)
+            plt.savefig(temp_img.name, dpi=150, bbox_inches='tight')
+            plt.close()
 
             # Add to document
             doc.add_heading('Funding by Bundle', level=2)
