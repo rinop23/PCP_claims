@@ -587,7 +587,7 @@ def create_docx_report(summary, agent, docx_path):
     doc.add_heading('Bundle Performance Analysis', level=1)
     bundles = summary.get('bundle_tracker', [])
 
-    if bundles:
+    if bundles and len(bundles) > 0:
         doc.add_paragraph(f"Total Bundles: {len(bundles)}")
         doc.add_paragraph("")
 
@@ -595,49 +595,65 @@ def create_docx_report(summary, agent, docx_path):
         try:
             df_bundles = pd.DataFrame(bundles)
 
-            # Create matplotlib bar chart
-            fig, ax = plt.subplots(figsize=(10, 6))
-            bars = ax.bar(df_bundles['bundle_id'], df_bundles['funding_drawn'], color='#2ca02c')
-            ax.set_xlabel('Bundle ID')
-            ax.set_ylabel('Funding (£)')
-            ax.set_title('Funding Drawn by Bundle', fontsize=14, fontweight='bold')
-            plt.xticks(rotation=45, ha='right')
-            plt.tight_layout()
+            # Check if required columns exist and have data
+            if 'bundle_id' in df_bundles.columns and 'funding_drawn' in df_bundles.columns:
+                # Filter out bundles with zero or null funding
+                df_bundles_filtered = df_bundles[df_bundles['funding_drawn'].fillna(0) > 0]
 
-            # Save to temp file
-            temp_img = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
-            plt.savefig(temp_img.name, dpi=150, bbox_inches='tight')
-            plt.close()
+                if len(df_bundles_filtered) > 0:
+                    # Create matplotlib bar chart
+                    fig, ax = plt.subplots(figsize=(10, 6))
+                    bars = ax.bar(df_bundles_filtered['bundle_id'], df_bundles_filtered['funding_drawn'], color='#2ca02c')
+                    ax.set_xlabel('Bundle ID')
+                    ax.set_ylabel('Funding (£)')
+                    ax.set_title('Funding Drawn by Bundle', fontsize=14, fontweight='bold')
+                    plt.xticks(rotation=45, ha='right')
+                    plt.tight_layout()
 
-            # Add to document
-            doc.add_heading('Funding by Bundle', level=2)
-            doc.add_picture(temp_img.name, width=Inches(5.5))
-            doc.add_paragraph("")
+                    # Save to temp file
+                    temp_img = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
+                    plt.savefig(temp_img.name, dpi=150, bbox_inches='tight')
+                    plt.close()
 
-            # Clean up temp file
-            os.unlink(temp_img.name)
+                    # Add to document
+                    doc.add_heading('Funding by Bundle', level=2)
+                    doc.add_picture(temp_img.name, width=Inches(5.5))
+                    doc.add_paragraph("")
+
+                    # Clean up temp file
+                    os.unlink(temp_img.name)
+                else:
+                    doc.add_paragraph("No bundle funding data available to chart.")
+                    doc.add_paragraph("")
+            else:
+                doc.add_paragraph("Bundle data structure incomplete - chart not generated.")
+                doc.add_paragraph("")
         except Exception as e:
             doc.add_paragraph(f"[Chart generation skipped: {str(e)}]")
+            doc.add_paragraph("")
+        # Bundle details table (only if we have bundles)
+        if bundles and len(bundles) > 0:
+            doc.add_heading('Bundle Details', level=2)
+            table = doc.add_table(rows=1, cols=5)
+            table.style = 'Light Grid Accent 1'
+            hdr_cells = table.rows[0].cells
+            hdr_cells[0].text = 'Bundle ID'
+            hdr_cells[1].text = 'Claimants'
+            hdr_cells[2].text = 'Funding Drawn'
+            hdr_cells[3].text = 'DBA Proceeds'
+            hdr_cells[4].text = 'Status'
 
-        # Bundle details table
-        doc.add_heading('Bundle Details', level=2)
-        table = doc.add_table(rows=1, cols=5)
-        table.style = 'Light Grid Accent 1'
-        hdr_cells = table.rows[0].cells
-        hdr_cells[0].text = 'Bundle ID'
-        hdr_cells[1].text = 'Claimants'
-        hdr_cells[2].text = 'Funding Drawn'
-        hdr_cells[3].text = 'DBA Proceeds'
-        hdr_cells[4].text = 'Status'
+            for bundle in bundles:
+                row_cells = table.add_row().cells
+                row_cells[0].text = str(bundle.get('bundle_id', 'N/A'))
+                row_cells[1].text = str(bundle.get('claimants_in_bundle', 0))
+                row_cells[2].text = f"£{bundle.get('funding_drawn', 0):,.2f}"
+                row_cells[3].text = f"£{bundle.get('dba_proceeds_received', 0):,.2f}"
+                row_cells[4].text = str(bundle.get('current_status', 'Unknown'))
 
-        for bundle in bundles:
-            row_cells = table.add_row().cells
-            row_cells[0].text = bundle['bundle_id']
-            row_cells[1].text = str(bundle['claimants_in_bundle'])
-            row_cells[2].text = f"£{bundle['funding_drawn']:,.2f}"
-            row_cells[3].text = f"£{bundle['dba_proceeds_received']:,.2f}"
-            row_cells[4].text = bundle['current_status']
-
+            doc.add_paragraph("")
+    else:
+        doc.add_paragraph("No bundle data available in this report.")
         doc.add_paragraph("")
 
     # Flagged Claims (NOT Eligible) - Only show claims that need attention
