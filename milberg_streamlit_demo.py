@@ -9,6 +9,7 @@ from pcp_funding_agent import PCPFundingAgent
 from docx import Document
 import os
 from datetime import datetime
+import hashlib
 
 # Page configuration
 st.set_page_config(
@@ -17,6 +18,82 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# ==================== AUTHENTICATION ====================
+def hash_password(password):
+    """Hash password using SHA-256"""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+# User credentials (username: hashed_password)
+USERS = {
+    "admin": hash_password("Admin123!"),
+    "walter": hash_password("Walter123!"),
+    "dirk": hash_password("Dirk123!"),
+    "eda": hash_password("Eda123!")
+}
+
+def check_authentication():
+    """Handle user authentication"""
+
+    # Initialize session state
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
+        st.session_state.username = None
+
+    # If already authenticated, return True
+    if st.session_state.authenticated:
+        return True
+
+    # Show login form
+    st.markdown("<h1 style='text-align: center; color: #1f77b4;'>🔐 PCP Claims Analysis</h1>", unsafe_allow_html=True)
+    st.markdown("<h3 style='text-align: center;'>Please log in to continue</h3>", unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+
+    with col2:
+        with st.form("login_form"):
+            username = st.text_input("Username", placeholder="Enter your username")
+            password = st.text_input("Password", type="password", placeholder="Enter your password")
+            submit = st.form_submit_button("Login", use_container_width=True)
+
+            if submit:
+                if username in USERS and USERS[username] == hash_password(password):
+                    st.session_state.authenticated = True
+                    st.session_state.username = username
+                    st.success(f"Welcome, {username.capitalize()}!")
+                    st.rerun()
+                else:
+                    st.error("Invalid username or password")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        with st.expander("ℹ️ Default Credentials"):
+            st.markdown("""
+            **For initial setup, use these credentials:**
+            - Admin: `admin` / `Admin123!`
+            - Walter: `walter` / `Walter123!`
+            - Dirk: `dirk` / `Dirk123!`
+            - Eda: `eda` / `Eda123!`
+
+            *Please change passwords after first login in production.*
+            """)
+
+    return False
+
+# Check authentication before showing app
+if not check_authentication():
+    st.stop()
+
+# Add logout button in sidebar
+with st.sidebar:
+    st.markdown(f"**Logged in as:** {st.session_state.username.capitalize()}")
+    if st.button("🚪 Logout", use_container_width=True):
+        st.session_state.authenticated = False
+        st.session_state.username = None
+        st.rerun()
+    st.markdown("---")
+
+# ==================== END AUTHENTICATION ===================="
 
 # Custom CSS for better styling
 st.markdown("""
