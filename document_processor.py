@@ -635,55 +635,109 @@ IMPORTANT:
     def _fallback_word_extraction(self, combined_text: str, tables_data: List, file_path: str) -> Dict[str, Any]:
         """
         Fallback method for Word extraction if OpenAI parsing fails
+        Handles both individual claim tables and portfolio summary tables
         """
         print("[Info] Using fallback extraction method")
 
-        # Use existing text extraction logic
-        extracted_data = self.extract_from_text(combined_text)
+        # Initialize extracted data
+        extracted_data = {
+            'report_type': 'Milberg Monthly Report',
+            'processed_at': datetime.now().isoformat(),
+            'source_file': file_path,
+            'last_update': datetime.now().strftime('%Y-%m-%d'),
+            'tables_found': len(tables_data),
+            'extraction_method': 'fallback',
+            'claims': [],
+            'portfolio_summary': {},
+            'bundle_tracker': []
+        }
 
-        # Add metadata
-        extracted_data['report_type'] = 'Word Document Report'
-        extracted_data['processed_at'] = datetime.now().isoformat()
-        extracted_data['source_file'] = file_path
-        extracted_data['last_update'] = datetime.now().strftime('%Y-%m-%d')
-        extracted_data['tables_found'] = len(tables_data)
-        extracted_data['extraction_method'] = 'fallback'
-
-        # Try to extract structured data from tables if present
+        # Try to extract structured data from tables
         claims = []
+        portfolio_stats = {}
+
         if tables_data:
-            # Process tables to find claim information
-            for table_data in tables_data:
+            for table_idx, table_data in enumerate(tables_data):
                 if len(table_data) > 1:  # Has header and data rows
                     header_row = [h.lower().strip() for h in table_data[0]]
 
-                    # Check if this looks like a claims table
-                    claim_indicators = ['claimant', 'claim', 'bundle', 'redress', 'respondent']
-                    if any(indicator in ' '.join(header_row) for indicator in claim_indicators):
-                        # Process data rows
-                        for data_row in table_data[1:]:
-                            claim = self._extract_claim_from_table_row(header_row, data_row)
-                            if claim:
-                                claims.append(claim)
+                    # Check if this is a portfolio composition table (by lender)
+                    if any('lender' in h or 'defendant' in h for h in header_row):
+                        print(f"[Info] Found lender composition table (Table {table_idx + 1})")
+                        # Extract claims by lender
+                        for row in table_data[1:]:
+                            if len(row) >= 2 and row[0].strip() and not row[0].lower().startswith('total'):
+                                lender_name = row[0].strip()
+                                try:
+                                    num_claims = int(row[1].strip()) if len(row) > 1 else 0
+                                    # Create placeholder claims for each lender
+                                    for i in range(num_claims):
+                                        claims.append({
+                                            'claim_id': f"{lender_name.upper().replace(' ', '_')}_{i+1}",
+                                            'claimant_id': f"{lender_name.upper().replace(' ', '_')}_{i+1}",
+                                            'defendant': lender_name,
+                                            'law_firm': 'Milberg',
+                                            'status': 'in_progress',
+                                            'claim_amount': 0,
+                                            'funded_amount': 0,
+                                            'source_table': f'Table {table_idx + 1} - Lender Composition'
+                                        })
+                                except (ValueError, IndexError):
+                                    continue
 
-        if claims:
-            extracted_data['claims'] = claims
-            extracted_data['total_claims'] = len(claims)
+                    # Check if this is a portfolio summary table
+                    elif any('metric' in h or 'total' in h for h in header_row):
+                        print(f"[Info] Found portfolio summary table (Table {table_idx + 1})")
+                        # Extract portfolio metrics
+                        for row in table_data[1:]:
+                            if len(row) >= 2:
+                                metric_name = row[0].strip().lower()
+                                if 'clients' in metric_name or 'claimants' in metric_name:
+                                    try:
+                                        # Try cumulative column first (usually index 2), then current month (index 1)
+                                        value_str = row[2].strip() if len(row) > 2 else row[1].strip()
+                                        value_str = value_str.replace(',', '').replace('£', '').replace('�', '')
+                                        portfolio_stats['total_claimants'] = int(value_str) if value_str.isdigit() else 0
+                                    except (ValueError, IndexError):
+                                        pass
+                                elif 'claims' in metric_name and 'unique' in metric_name:
+                                    try:
+                                        value_str = row[2].strip() if len(row) > 2 else row[1].strip()
+                                        value_str = value_str.replace(',', '')
+                                        portfolio_stats['total_claims_submitted'] = int(value_str) if value_str.isdigit() else 0
+                                    except (ValueError, IndexError):
+                                        pass
 
-            # Calculate summary statistics
-            total_claim_value = sum(c.get('claim_amount', 0) for c in claims)
-            total_funded = sum(c.get('funded_amount', 0) for c in claims)
+                    # Check if this looks like individual claims table
+                    else:
+                        claim_indicators = ['claimant id', 'claim id', 'bundle', 'redress', 'respondent']
+                        if any(indicator in ' '.join(header_row) for indicator in claim_indicators):
+                            print(f"[Info] Found individual claims table (Table {table_idx + 1})")
+                            # Process data rows for individual claims
+                            for data_row in table_data[1:]:
+                                claim = self._extract_claim_from_table_row(header_row, data_row)
+                                if claim:
+                                    claims.append(claim)
 
-            extracted_data['portfolio_summary'] = {
-                'total_claims': len(claims),
-                'total_claim_value': total_claim_value,
-                'total_funded': total_funded,
-                'extracted_from': 'word_tables'
-            }
-        else:
-            # Single claim document
-            extracted_data['claims'] = [extracted_data.copy()]
-            extracted_data['total_claims'] = 1
+        # Calculate totals
+        total_claims = len(claims)
+        total_claim_value = sum(c.get('claim_amount', 0) for c in claims)
+        total_funded = sum(c.get('funded_amount', 0) for c in claims)
+
+        extracted_data['claims'] = claims
+        extracted_data['total_claims'] = total_claims
+
+        extracted_data['portfolio_summary'] = {
+            'total_claims': total_claims,
+            'total_claimants': portfolio_stats.get('total_claimants', total_claims),
+            'total_claims_submitted': portfolio_stats.get('total_claims_submitted', total_claims),
+            'total_claim_value': total_claim_value,
+            'total_funded': total_funded,
+            'extracted_from': 'word_tables',
+            'report_type': 'Summary Report'
+        }
+
+        print(f"[Info] Extracted {total_claims} claims from Word document")
 
         return extracted_data
 
