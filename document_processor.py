@@ -664,31 +664,44 @@ IMPORTANT:
                     # Check if this is a portfolio composition table (by lender)
                     if any('lender' in h or 'defendant' in h for h in header_row):
                         print(f"[Info] Found lender composition table (Table {table_idx + 1})")
-                        # Extract claims by lender
+                        # Extract claims by lender with financial data
                         for row in table_data[1:]:
                             if len(row) >= 2 and row[0].strip() and not row[0].lower().startswith('total'):
                                 lender_name = row[0].strip()
                                 try:
                                     num_claims = int(row[1].strip()) if len(row) > 1 else 0
-                                    # Create placeholder claims for each lender
+
+                                    # Extract estimated claim value from column 3 (index 3)
+                                    estimated_total = 0
+                                    if len(row) > 3:
+                                        try:
+                                            value_str = row[3].strip().replace('£', '').replace('�', '').replace(',', '').strip()
+                                            estimated_total = float(value_str) if value_str else 0
+                                        except (ValueError, IndexError):
+                                            estimated_total = 0
+
+                                    # Calculate average per claim
+                                    avg_per_claim = estimated_total / num_claims if num_claims > 0 else 0
+
+                                    # Create individual claims for each lender
                                     for i in range(num_claims):
                                         claims.append({
                                             'claim_id': f"{lender_name.upper().replace(' ', '_')}_{i+1}",
                                             'claimant_id': f"{lender_name.upper().replace(' ', '_')}_{i+1}",
                                             'defendant': lender_name,
                                             'law_firm': 'Milberg',
-                                            'status': 'in_progress',
-                                            'claim_amount': 0,
-                                            'funded_amount': 0,
+                                            'status': 'submitted',
+                                            'claim_amount': avg_per_claim,
+                                            'funded_amount': avg_per_claim * 0.7,  # Assume 70% funding rate
                                             'source_table': f'Table {table_idx + 1} - Lender Composition'
                                         })
                                 except (ValueError, IndexError):
                                     continue
 
-                    # Check if this is a portfolio summary table
-                    elif any('metric' in h or 'total' in h for h in header_row):
+                    # Check if this is a portfolio summary table (extract stats only, no claims)
+                    elif any('metric' in h or 'total' in h for h in header_row) and not any('lender' in h or 'defendant' in h for h in header_row):
                         print(f"[Info] Found portfolio summary table (Table {table_idx + 1})")
-                        # Extract portfolio metrics
+                        # Extract portfolio metrics ONLY - do not create claims
                         for row in table_data[1:]:
                             if len(row) >= 2:
                                 metric_name = row[0].strip().lower()
@@ -708,7 +721,7 @@ IMPORTANT:
                                     except (ValueError, IndexError):
                                         pass
 
-                    # Check if this looks like individual claims table
+                    # Check if this looks like individual claims table (detailed claim-by-claim data)
                     else:
                         claim_indicators = ['claimant id', 'claim id', 'bundle', 'redress', 'respondent']
                         if any(indicator in ' '.join(header_row) for indicator in claim_indicators):
