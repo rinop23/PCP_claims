@@ -13,6 +13,7 @@ import openpyxl
 from openpyxl import load_workbook
 import pandas as pd
 from docx import Document
+import os
 
 # Set stdout encoding to UTF-8 for Windows compatibility
 if sys.platform == 'win32':
@@ -25,9 +26,28 @@ if sys.platform == 'win32':
 
 class DocumentProcessor:
     """Process and extract data from legal documents"""
-    
+
     def __init__(self):
         self.extraction_patterns = self._compile_patterns()
+
+    def call_openai_llm(self, prompt: str, model: str = "gpt-4o", max_tokens: int = 4000, temperature: float = 0.2) -> str:
+        """
+        Call OpenAI ChatCompletion API with a prompt and return the response text.
+        Compatible with openai>=1.0.0
+        """
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            response = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=max_tokens,
+                temperature=temperature
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            print(f"[OpenAI API Error] {e}")
+            return f"[OpenAI API Error: {str(e)}]"
     
     def _compile_patterns(self) -> Dict[str, re.Pattern]:
         """Compile regex patterns for data extraction"""
@@ -469,7 +489,7 @@ class DocumentProcessor:
     def extract_from_word(self, file_path: str) -> Dict[str, Any]:
         """
         Extract structured data from Word documents (e.g., Milberg monthly report in .docx format)
-        Uses text extraction and parsing similar to text-based extraction
+        Uses OpenAI to intelligently parse and structure the document content
         """
         try:
             doc = Document(file_path)
@@ -482,6 +502,7 @@ class DocumentProcessor:
 
             # Extract text from tables
             tables_data = []
+            tables_text = []
             for table in doc.tables:
                 table_text = []
                 for row in table.rows:
@@ -490,57 +511,115 @@ class DocumentProcessor:
                         table_text.append(row_data)
                 if table_text:
                     tables_data.append(table_text)
+                    # Convert table to readable text format
+                    tables_text.append('\n'.join([' | '.join(row) for row in table_text]))
 
-            # Combine all text for pattern matching
+            # Combine all text
             combined_text = '\n'.join(full_text)
+            all_tables_text = '\n\n--- TABLE ---\n\n'.join(tables_text)
+            full_document_text = f"{combined_text}\n\n{'='*50}\nTABLES:\n{'='*50}\n\n{all_tables_text}"
 
-            # Use existing text extraction logic
-            extracted_data = self.extract_from_text(combined_text)
+            print(f"[Info] Extracted {len(tables_data)} tables from Word document")
+            print(f"[Info] Sending to OpenAI for intelligent parsing...")
 
-            # Add metadata
-            extracted_data['report_type'] = 'Word Document Report'
-            extracted_data['processed_at'] = datetime.now().isoformat()
-            extracted_data['source_file'] = file_path
-            extracted_data['last_update'] = datetime.now().strftime('%Y-%m-%d')
-            extracted_data['tables_found'] = len(tables_data)
+            # Use OpenAI to intelligently parse the document
+            prompt = f"""You are a legal document analyst specializing in PCP (Personal Contract Purchase) claims reports.
 
-            # Try to extract structured data from tables if present
-            claims = []
-            if tables_data:
-                # Process tables to find claim information
-                for table_data in tables_data:
-                    if len(table_data) > 1:  # Has header and data rows
-                        header_row = [h.lower().strip() for h in table_data[0]]
+Analyze the following Milberg monthly report document and extract ALL claim information in a structured JSON format.
 
-                        # Check if this looks like a claims table
-                        claim_indicators = ['claimant', 'claim', 'bundle', 'redress', 'respondent']
-                        if any(indicator in ' '.join(header_row) for indicator in claim_indicators):
-                            # Process data rows
-                            for data_row in table_data[1:]:
-                                claim = self._extract_claim_from_table_row(header_row, data_row)
-                                if claim:
-                                    claims.append(claim)
+DOCUMENT CONTENT:
+{full_document_text[:15000]}
 
-            if claims:
-                extracted_data['claims'] = claims
-                extracted_data['total_claims'] = len(claims)
+Your task:
+1. Identify ALL individual claims mentioned in the document (from tables or text)
+2. For EACH claim, extract the following fields (use null if not found):
+   - claim_id or claimant_id (any reference number)
+   - defendant or respondent (lender name)
+   - claim_amount or redress_calculated (monetary value in £)
+   - funded_amount or funder_share (monetary value in £)
+   - status or decision_status
+   - agreement_date
+   - product_type (e.g., PCP, HP, Conditional Sale)
+   - loan_amount
+   - commission_pct_of_cost (percentage)
+   - submission_date
 
-                # Calculate summary statistics
-                total_claim_value = sum(c.get('claim_amount', 0) for c in claims)
-                total_funded = sum(c.get('funded_amount', 0) for c in claims)
+3. Also extract portfolio summary information:
+   - total_bundles_funded
+   - total_claimants
+   - total_claims_submitted
+   - total_funding_provided
+   - report_date
 
-                extracted_data['portfolio_summary'] = {
-                    'total_claims': len(claims),
-                    'total_claim_value': total_claim_value,
-                    'total_funded': total_funded,
-                    'extracted_from': 'word_tables'
-                }
-            else:
-                # Single claim document
-                extracted_data['claims'] = [extracted_data.copy()]
-                extracted_data['total_claims'] = 1
+Return a JSON object with this structure:
+{{
+  "report_type": "Milberg Monthly Report",
+  "report_date": "YYYY-MM-DD",
+  "portfolio_summary": {{
+    "total_bundles_funded": 0,
+    "total_claimants": 0,
+    "total_claims_submitted": 0,
+    "total_funding_provided": 0.0,
+    "total_dba_proceeds": 0.0,
+    "funder_total_share": 0.0
+  }},
+  "claims": [
+    {{
+      "claim_id": "...",
+      "claimant_id": "...",
+      "defendant": "...",
+      "claim_amount": 0.0,
+      "funded_amount": 0.0,
+      "status": "...",
+      "agreement_date": "...",
+      "product_type": "...",
+      "loan_amount": 0.0,
+      "commission_pct_of_cost": 0.0,
+      "submission_date": "...",
+      "law_firm": "Milberg"
+    }}
+  ],
+  "bundle_tracker": []
+}}
 
-            return extracted_data
+IMPORTANT:
+- Extract ALL claims you can find
+- Use numeric values for amounts (not strings)
+- Use "Milberg" as the law_firm for all claims
+- Return ONLY valid JSON, no additional text"""
+
+            # Call OpenAI
+            llm_response = self.call_openai_llm(prompt, model="gpt-4o", max_tokens=4000)
+
+            # Parse JSON response
+            try:
+                # Clean response (remove markdown code blocks if present)
+                cleaned_response = llm_response.strip()
+                if cleaned_response.startswith('```'):
+                    # Remove markdown code blocks
+                    lines = cleaned_response.split('\n')
+                    cleaned_response = '\n'.join([l for l in lines if not l.startswith('```')])
+
+                extracted_data = json.loads(cleaned_response)
+
+                # Add metadata
+                extracted_data['processed_at'] = datetime.now().isoformat()
+                extracted_data['source_file'] = file_path
+                extracted_data['last_update'] = datetime.now().strftime('%Y-%m-%d')
+                extracted_data['tables_found'] = len(tables_data)
+                extracted_data['extraction_method'] = 'openai_llm'
+                extracted_data['total_claims'] = len(extracted_data.get('claims', []))
+
+                print(f"[Success] OpenAI extracted {extracted_data['total_claims']} claims")
+
+                return extracted_data
+
+            except json.JSONDecodeError as e:
+                print(f"[Warning] Could not parse OpenAI response as JSON: {e}")
+                print(f"[Debug] LLM Response: {llm_response[:500]}")
+
+                # Fallback to basic extraction
+                return self._fallback_word_extraction(combined_text, tables_data, file_path)
 
         except Exception as e:
             print(f"Error extracting from Word document: {str(e)}")
@@ -552,6 +631,61 @@ class DocumentProcessor:
                 'source_file': file_path,
                 'processed_at': datetime.now().isoformat()
             }
+
+    def _fallback_word_extraction(self, combined_text: str, tables_data: List, file_path: str) -> Dict[str, Any]:
+        """
+        Fallback method for Word extraction if OpenAI parsing fails
+        """
+        print("[Info] Using fallback extraction method")
+
+        # Use existing text extraction logic
+        extracted_data = self.extract_from_text(combined_text)
+
+        # Add metadata
+        extracted_data['report_type'] = 'Word Document Report'
+        extracted_data['processed_at'] = datetime.now().isoformat()
+        extracted_data['source_file'] = file_path
+        extracted_data['last_update'] = datetime.now().strftime('%Y-%m-%d')
+        extracted_data['tables_found'] = len(tables_data)
+        extracted_data['extraction_method'] = 'fallback'
+
+        # Try to extract structured data from tables if present
+        claims = []
+        if tables_data:
+            # Process tables to find claim information
+            for table_data in tables_data:
+                if len(table_data) > 1:  # Has header and data rows
+                    header_row = [h.lower().strip() for h in table_data[0]]
+
+                    # Check if this looks like a claims table
+                    claim_indicators = ['claimant', 'claim', 'bundle', 'redress', 'respondent']
+                    if any(indicator in ' '.join(header_row) for indicator in claim_indicators):
+                        # Process data rows
+                        for data_row in table_data[1:]:
+                            claim = self._extract_claim_from_table_row(header_row, data_row)
+                            if claim:
+                                claims.append(claim)
+
+        if claims:
+            extracted_data['claims'] = claims
+            extracted_data['total_claims'] = len(claims)
+
+            # Calculate summary statistics
+            total_claim_value = sum(c.get('claim_amount', 0) for c in claims)
+            total_funded = sum(c.get('funded_amount', 0) for c in claims)
+
+            extracted_data['portfolio_summary'] = {
+                'total_claims': len(claims),
+                'total_claim_value': total_claim_value,
+                'total_funded': total_funded,
+                'extracted_from': 'word_tables'
+            }
+        else:
+            # Single claim document
+            extracted_data['claims'] = [extracted_data.copy()]
+            extracted_data['total_claims'] = 1
+
+        return extracted_data
 
     def _extract_claim_from_table_row(self, headers: List[str], row_data: List[str]) -> Optional[Dict[str, Any]]:
         """
