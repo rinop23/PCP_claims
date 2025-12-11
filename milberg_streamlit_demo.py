@@ -790,6 +790,83 @@ def main():
             st.header("Financial Overview")
             create_financial_overview(summary)
 
+            # Display Pipeline Breakdown (if available from new Excel format)
+            if 'pipeline_breakdown' in summary:
+                st.markdown("---")
+                st.subheader("📋 Claim Pipeline Breakdown")
+                pipeline = summary['pipeline_breakdown']
+
+                # Create DataFrame for pipeline
+                pipeline_data = []
+                for stage_name, stage_key in [
+                    ('Awaiting DSAR', 'awaiting_dsar'),
+                    ('Pending Submission', 'pending_submission'),
+                    ('Under Review', 'under_review'),
+                    ('Settlement Offered', 'settlement_offered'),
+                    ('Paid', 'paid')
+                ]:
+                    stage_info = pipeline.get(stage_key, {})
+                    pipeline_data.append({
+                        'Stage': stage_name,
+                        'Count': int(stage_info.get('count', 0)),
+                        'Estimated Value': f"£{stage_info.get('value', 0):,.2f}"
+                    })
+
+                pipeline_df = pd.DataFrame(pipeline_data)
+                st.dataframe(pipeline_df, use_container_width=True, hide_index=True)
+
+                # Pipeline visualization
+                fig_pipeline = px.funnel(
+                    pipeline_df,
+                    x='Count',
+                    y='Stage',
+                    title='Claims Pipeline Funnel'
+                )
+                st.plotly_chart(fig_pipeline, use_container_width=True)
+
+            # Display Financial Utilisation (if available from new Excel format)
+            if 'financial_utilisation' in summary:
+                st.markdown("---")
+                st.subheader("💰 Financial Utilisation Overview")
+                financial = summary['financial_utilisation']
+
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    # Cost breakdown
+                    st.markdown("#### Cost Breakdown")
+                    costs_df = pd.DataFrame({
+                        'Category': [
+                            'Client Acquisition',
+                            'Claim Submission',
+                            'Claim Processing',
+                            'Legal Costs'
+                        ],
+                        'Amount (£)': [
+                            financial.get('acquisition_cost', 0),
+                            financial.get('submission_cost', 0),
+                            financial.get('processing_cost', 0),
+                            financial.get('legal_cost', 0)
+                        ]
+                    })
+                    st.dataframe(costs_df, use_container_width=True, hide_index=True)
+
+                with col2:
+                    # Summary metrics
+                    st.markdown("#### Summary")
+                    st.metric("Total Action Costs", f"£{financial.get('total_action_costs', 0):,.2f}")
+                    st.metric("Collection Account Balance", f"£{financial.get('collection_account_balance', 0):,.2f}")
+
+                    # Cost distribution pie chart
+                    if financial.get('total_action_costs', 0) > 0:
+                        fig_costs = px.pie(
+                            costs_df,
+                            values='Amount (£)',
+                            names='Category',
+                            title='Cost Distribution'
+                        )
+                        st.plotly_chart(fig_costs, use_container_width=True)
+
         with tab2:
             st.header("FCA Eligibility Analysis")
             create_eligibility_charts(summary)

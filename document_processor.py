@@ -819,13 +819,184 @@ IMPORTANT:
             print(f"Error extracting claim from table row: {str(e)}")
             return None
 
+    def extract_from_excel_monthly_summary(self, file_path: str) -> Dict[str, Any]:
+        """
+        Extract data from new Milberg Monthly Summary Excel format
+        Single sheet with sections: Portfolio Overview, Claim Pipeline, Lender Distribution, etc.
+        """
+        try:
+            import openpyxl
+
+            wb = openpyxl.load_workbook(file_path)
+            ws = wb['Monthly Summary']
+
+            print(f"[Info] Processing new Milberg Monthly Summary format")
+
+            extracted_data = {
+                'report_type': 'Milberg Monthly Summary',
+                'processed_at': datetime.now().isoformat(),
+                'source_file': file_path,
+                'last_update': datetime.now().strftime('%Y-%m-%d'),
+                'extraction_method': 'monthly_summary_excel',
+                'claims': [],
+                'portfolio_summary': {},
+                'bundle_tracker': []
+            }
+
+            # Extract reporting period (Row 3)
+            reporting_period = ws.cell(row=3, column=3).value
+            if reporting_period and reporting_period != '[Month/Year]':
+                extracted_data['report_date'] = str(reporting_period)
+
+            # Section 2: Portfolio Overview (Rows 9-15)
+            portfolio_stats = {}
+            portfolio_stats['unique_clients'] = self._get_excel_value(ws, 10, 3)  # Cumulative column
+            portfolio_stats['unique_claims'] = self._get_excel_value(ws, 11, 3)
+            portfolio_stats['claims_submitted'] = self._get_excel_value(ws, 12, 3)
+            portfolio_stats['claims_successful'] = self._get_excel_value(ws, 13, 3)
+            portfolio_stats['claims_rejected'] = self._get_excel_value(ws, 14, 3)
+            portfolio_stats['avg_claim_value'] = self._get_excel_value(ws, 15, 3)
+
+            # Section 3: Claim Pipeline Breakdown (Rows 18-23)
+            pipeline_breakdown = {}
+            pipeline_breakdown['awaiting_dsar'] = {'count': self._get_excel_value(ws, 19, 2), 'value': self._get_excel_value(ws, 19, 3)}
+            pipeline_breakdown['pending_submission'] = {'count': self._get_excel_value(ws, 20, 2), 'value': self._get_excel_value(ws, 20, 3)}
+            pipeline_breakdown['under_review'] = {'count': self._get_excel_value(ws, 21, 2), 'value': self._get_excel_value(ws, 21, 3)}
+            pipeline_breakdown['settlement_offered'] = {'count': self._get_excel_value(ws, 22, 2), 'value': self._get_excel_value(ws, 22, 3)}
+            pipeline_breakdown['paid'] = {'count': self._get_excel_value(ws, 23, 2), 'value': self._get_excel_value(ws, 23, 3)}
+
+            # Section 4: Lender Distribution (Row 27 onwards - find the table dynamically)
+            lender_distribution = []
+            lender_start_row = 28  # Data starts after header row 27
+            for row_idx in range(lender_start_row, ws.max_row + 1):
+                lender_name = ws.cell(row=row_idx, column=1).value
+                if lender_name and str(lender_name).strip() and not str(lender_name).startswith('5.'):
+                    num_claims = self._get_excel_value(ws, row_idx, 2)
+                    pct_total = self._get_excel_value(ws, row_idx, 3)
+                    est_value = self._get_excel_value(ws, row_idx, 4)
+
+                    if num_claims and num_claims > 0:
+                        lender_distribution.append({
+                            'lender': str(lender_name).strip(),
+                            'num_claims': num_claims,
+                            'pct_total': pct_total,
+                            'estimated_value': est_value
+                        })
+                elif str(lender_name).startswith('5.'):
+                    # Hit next section
+                    break
+
+            # Section 5: Financial Utilisation (Rows 32-38)
+            financial_utilisation = {}
+            financial_utilisation['acquisition_cost'] = self._get_excel_value(ws, 33, 3)
+            financial_utilisation['submission_cost'] = self._get_excel_value(ws, 34, 3)
+            financial_utilisation['processing_cost'] = self._get_excel_value(ws, 35, 3)
+            financial_utilisation['legal_cost'] = self._get_excel_value(ws, 36, 3)
+            financial_utilisation['total_action_costs'] = self._get_excel_value(ws, 37, 3)
+            financial_utilisation['collection_account_balance'] = self._get_excel_value(ws, 38, 3)
+
+            # Section 6: Forecasting (Rows 42-44)
+            forecasting = {}
+            forecasting['expected_new_clients'] = self._get_excel_value(ws, 42, 2)
+            forecasting['expected_submissions'] = self._get_excel_value(ws, 43, 2)
+            forecasting['expected_redress'] = self._get_excel_value(ws, 44, 2)
+
+            # Generate individual claims from lender distribution
+            claims = []
+            total_claim_value = 0
+
+            for lender_info in lender_distribution:
+                lender_name = lender_info['lender']
+                num_claims = lender_info['num_claims']
+                est_total_value = lender_info.get('estimated_value', 0) or 0
+
+                # Calculate average per claim
+                avg_per_claim = est_total_value / num_claims if num_claims > 0 else 0
+
+                # Create individual claim records
+                for i in range(int(num_claims)):
+                    claim_id = f"{lender_name.upper().replace(' ', '_').replace('/', '_')}_{i+1}"
+                    claims.append({
+                        'claim_id': claim_id,
+                        'claimant_id': claim_id,
+                        'defendant': lender_name,
+                        'law_firm': 'Milberg',
+                        'status': 'in_progress',
+                        'claim_amount': avg_per_claim,
+                        'funded_amount': avg_per_claim * 0.7,  # Assume 70% funding
+                        'source': 'lender_distribution_summary'
+                    })
+                    total_claim_value += avg_per_claim
+
+            # Build final structure
+            extracted_data['claims'] = claims
+            extracted_data['total_claims'] = len(claims)
+
+            extracted_data['portfolio_summary'] = {
+                'total_claims': portfolio_stats.get('unique_claims', len(claims)),
+                'total_claimants': portfolio_stats.get('unique_clients', 0),
+                'total_claims_submitted': portfolio_stats.get('claims_submitted', 0),
+                'claims_successful': portfolio_stats.get('claims_successful', 0),
+                'claims_rejected': portfolio_stats.get('claims_rejected', 0),
+                'avg_claim_value': portfolio_stats.get('avg_claim_value', 0),
+                'total_claim_value': total_claim_value,
+                'total_funded': sum(c.get('funded_amount', 0) for c in claims),
+                'report_type': 'Monthly Summary'
+            }
+
+            extracted_data['pipeline_breakdown'] = pipeline_breakdown
+            extracted_data['lender_distribution'] = lender_distribution
+            extracted_data['financial_utilisation'] = financial_utilisation
+            extracted_data['forecasting'] = forecasting
+
+            print(f"[Info] Extracted {len(claims)} claims from {len(lender_distribution)} lenders")
+
+            return extracted_data
+
+        except Exception as e:
+            print(f"Error processing Monthly Summary Excel: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {
+                'error': str(e),
+                'report_type': 'Monthly Summary Excel',
+                'source_file': file_path,
+                'processed_at': datetime.now().isoformat()
+            }
+
+    def _get_excel_value(self, worksheet, row: int, col: int):
+        """Helper to safely get numeric value from Excel cell"""
+        try:
+            value = worksheet.cell(row=row, column=col).value
+            if value is None or value == '':
+                return 0
+            # Try to convert to number
+            if isinstance(value, (int, float)):
+                return float(value)
+            # Try to parse string
+            if isinstance(value, str):
+                # Remove currency symbols and commas
+                clean_val = value.replace('£', '').replace('$', '').replace(',', '').replace('%', '').strip()
+                if clean_val:
+                    return float(clean_val)
+            return 0
+        except (ValueError, TypeError):
+            return 0
+
     def extract_from_excel_detailed(self, file_path: str) -> Dict[str, Any]:
         """
         Extract detailed information from Excel including summary statistics
+        Routes to appropriate extraction method based on Excel structure
         """
         # Check if this is a Milberg report
         try:
             xl = pd.ExcelFile(file_path)
+
+            # Check if it's the new Monthly Summary format (single sheet)
+            if 'Monthly Summary' in xl.sheet_names and len(xl.sheet_names) == 1:
+                return self.extract_from_excel_monthly_summary(file_path)
+
+            # Otherwise, check if it's the old multi-sheet format
             is_milberg = 'Bundle Tracker' in xl.sheet_names and 'Portfolio Summary' in xl.sheet_names
         except:
             is_milberg = False

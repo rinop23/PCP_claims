@@ -60,6 +60,14 @@ class ComprehensiveReportGenerator:
         # Charts and Visualizations
         self._add_visualizations(doc, extracted_data)
 
+        # Claim Pipeline Breakdown (if available from new Excel format)
+        if 'pipeline_breakdown' in extracted_data:
+            self._add_pipeline_breakdown_section(doc, extracted_data)
+
+        # Financial Utilisation (if available from new Excel format)
+        if 'financial_utilisation' in extracted_data:
+            self._add_financial_utilisation_section(doc, extracted_data)
+
         # FCA Compliance Summary (if available)
         if 'claim_eligibility' in extracted_data:
             self._add_fca_compliance_section(doc, extracted_data)
@@ -420,6 +428,91 @@ or redress calculations from the FCA scheme.
         run = footer_para.runs[0]
         run.font.italic = True
         run.font.color.rgb = RGBColor(128, 128, 128)
+
+    def _add_pipeline_breakdown_section(self, doc, data: Dict[str, Any]):
+        """Add claim pipeline breakdown section (for new Excel format)"""
+        doc.add_heading("Claim Pipeline Breakdown", level=1)
+
+        pipeline = data.get('pipeline_breakdown', {})
+
+        if pipeline:
+            # Create table
+            table = doc.add_table(rows=1, cols=3)
+            table.style = 'Light Grid Accent 1'
+
+            # Header
+            hdr_cells = table.rows[0].cells
+            hdr_cells[0].text = 'Stage'
+            hdr_cells[1].text = 'Count'
+            hdr_cells[2].text = 'Estimated Value'
+
+            # Add pipeline stages
+            stages = [
+                ('Awaiting DSAR', 'awaiting_dsar'),
+                ('Pending Submission', 'pending_submission'),
+                ('Under Review', 'under_review'),
+                ('Settlement Offered', 'settlement_offered'),
+                ('Paid', 'paid')
+            ]
+
+            for stage_name, stage_key in stages:
+                stage_data = pipeline.get(stage_key, {})
+                count = stage_data.get('count', 0)
+                value = stage_data.get('value', 0)
+
+                row_cells = table.add_row().cells
+                row_cells[0].text = stage_name
+                row_cells[1].text = str(int(count)) if count else '0'
+                row_cells[2].text = f"£{value:,.2f}" if value else '£0.00'
+
+        doc.add_paragraph()
+
+    def _add_financial_utilisation_section(self, doc, data: Dict[str, Any]):
+        """Add financial utilisation section (for new Excel format)"""
+        doc.add_heading("Financial Utilisation Overview", level=1)
+
+        financial = data.get('financial_utilisation', {})
+
+        if financial:
+            # Create table
+            table = doc.add_table(rows=1, cols=2)
+            table.style = 'Light Grid Accent 1'
+
+            # Header
+            hdr_cells = table.rows[0].cells
+            hdr_cells[0].text = 'Metric'
+            hdr_cells[1].text = 'Amount (£)'
+
+            # Add financial metrics
+            metrics = [
+                ('Client Acquisition Cost', 'acquisition_cost'),
+                ('Claim Submission Cost', 'submission_cost'),
+                ('Claim Processing Cost', 'processing_cost'),
+                ('Legal Costs', 'legal_cost'),
+                ('Total Action Costs', 'total_action_costs'),
+                ('Collection Account Balance', 'collection_account_balance')
+            ]
+
+            for metric_name, metric_key in metrics:
+                amount = financial.get(metric_key, 0)
+
+                row_cells = table.add_row().cells
+                row_cells[0].text = metric_name
+                row_cells[1].text = f"£{amount:,.2f}"
+
+            # Add summary paragraph
+            doc.add_paragraph()
+            total_costs = financial.get('total_action_costs', 0)
+            collection_balance = financial.get('collection_account_balance', 0)
+
+            summary_text = f"""
+Total operational costs for the reporting period amount to £{total_costs:,.2f},
+covering client acquisition, claim processing, and legal expenses.
+The collection account currently holds £{collection_balance:,.2f}.
+            """
+            doc.add_paragraph(summary_text.strip())
+
+        doc.add_paragraph()
 
     def _cleanup_charts(self):
         """Clean up temporary chart files"""

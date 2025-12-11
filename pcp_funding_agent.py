@@ -302,8 +302,8 @@ class PCPFundingAgent:
         file_type = file_path.lower().split('.')[-1]
         print(f"✓ {file_type.upper()} report processed: {ingested_count} claims ingested, {skipped_count} skipped")
 
-        # Generate comprehensive analysis report for Word documents
-        if file_type == 'docx':
+        # Generate comprehensive analysis report for all document types
+        if file_type in ['docx', 'xlsx', 'xls']:
             try:
                 from comprehensive_report_generator import ComprehensiveReportGenerator
                 generator = ComprehensiveReportGenerator()
