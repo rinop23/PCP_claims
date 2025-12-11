@@ -860,6 +860,237 @@ def create_docx_report(summary, agent, docx_path):
     doc.save(docx_path)
 
 
+def create_lender_analysis(summary, agent):
+    """Create lender/defendant distribution analysis"""
+    st.subheader("Distribution by Lender/Defendant")
+
+    # Extract lender data from claims
+    lender_data = {}
+    for claim_id, claim_obj in agent.claims_data.items():
+        lender = claim_obj.defendant if hasattr(claim_obj, 'defendant') else 'Unknown'
+        if lender not in lender_data:
+            lender_data[lender] = {
+                'count': 0,
+                'total_value': 0,
+                'funded': 0,
+                'claims': []
+            }
+        lender_data[lender]['count'] += 1
+        lender_data[lender]['total_value'] += claim_obj.claim_amount
+        lender_data[lender]['funded'] += claim_obj.funded_amount
+        lender_data[lender]['claims'].append(claim_id)
+
+    if not lender_data:
+        st.info("No lender data available")
+        return
+
+    # Create DataFrame
+    lender_df = pd.DataFrame([
+        {
+            'Lender/Defendant': lender,
+            'Number of Claims': data['count'],
+            'Total Claim Value': data['total_value'],
+            'Total Funded': data['funded'],
+            'Avg Claim Value': data['total_value'] / data['count'] if data['count'] > 0 else 0
+        }
+        for lender, data in lender_data.items()
+    ]).sort_values('Total Claim Value', ascending=False)
+
+    # Calculate percentages
+    total_claims = lender_df['Number of Claims'].sum()
+    total_value = lender_df['Total Claim Value'].sum()
+    lender_df['% of Claims'] = (lender_df['Number of Claims'] / total_claims * 100).round(1)
+    lender_df['% of Value'] = (lender_df['Total Claim Value'] / total_value * 100).round(1)
+
+    # Visualizations
+    col1, col2 = st.columns(2)
+
+    with col1:
+        # Pie chart - Claims count
+        fig_pie = px.pie(
+            lender_df,
+            values='Number of Claims',
+            names='Lender/Defendant',
+            title='Claims Distribution by Lender',
+            color_discrete_sequence=px.colors.qualitative.Set3
+        )
+        fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+        st.plotly_chart(fig_pie, use_container_width=True)
+
+    with col2:
+        # Bar chart - Claim values
+        fig_bar = px.bar(
+            lender_df,
+            x='Lender/Defendant',
+            y='Total Claim Value',
+            title='Total Claim Value by Lender',
+            color='Total Claim Value',
+            color_continuous_scale='Viridis'
+        )
+        fig_bar.update_layout(showlegend=False)
+        st.plotly_chart(fig_bar, use_container_width=True)
+
+    # Detailed table
+    st.subheader("Detailed Breakdown")
+    display_df = lender_df.copy()
+    display_df['Total Claim Value'] = display_df['Total Claim Value'].apply(lambda x: f"£{x:,.2f}")
+    display_df['Total Funded'] = display_df['Total Funded'].apply(lambda x: f"£{x:,.2f}")
+    display_df['Avg Claim Value'] = display_df['Avg Claim Value'].apply(lambda x: f"£{x:,.2f}")
+    st.dataframe(display_df, use_container_width=True)
+
+    # Top lenders highlight
+    st.subheader("Key Insights")
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        top_lender = lender_df.iloc[0]
+        st.metric(
+            "Largest Lender",
+            top_lender['Lender/Defendant'],
+            f"{top_lender['Number of Claims']} claims"
+        )
+
+    with col2:
+        st.metric(
+            "Total Lenders",
+            len(lender_df),
+            f"{total_claims} total claims"
+        )
+
+    with col3:
+        concentration = lender_df.iloc[0]['% of Value']
+        st.metric(
+            "Top Lender Concentration",
+            f"{concentration:.1f}%",
+            "of total value"
+        )
+
+
+def create_claims_statistics(summary, agent):
+    """Create claims statistics and pipeline analysis"""
+
+    # Get eligibility data
+    eligibility = summary.get('claim_eligibility', {})
+
+    if not eligibility:
+        st.info("No claims data available")
+        return
+
+    # Statistics overview
+    st.subheader("Claims Overview")
+    col1, col2, col3, col4 = st.columns(4)
+
+    total_claims = len(eligibility)
+    eligible_claims = sum(1 for v in eligibility.values() if v.get('eligible'))
+    not_eligible = total_claims - eligible_claims
+    eligibility_rate = (eligible_claims / total_claims * 100) if total_claims > 0 else 0
+
+    with col1:
+        st.metric("Total Claims Processed", total_claims)
+
+    with col2:
+        st.metric("Eligible Claims", eligible_claims, f"{eligibility_rate:.1f}%")
+
+    with col3:
+        st.metric("Not Eligible", not_eligible, f"{100-eligibility_rate:.1f}%")
+
+    with col4:
+        # Calculate average claim value
+        avg_value = sum(claim.claim_amount for claim in agent.claims_data.values()) / len(agent.claims_data) if agent.claims_data else 0
+        st.metric("Avg Claim Value", f"£{avg_value:,.0f}")
+
+    st.markdown("---")
+
+    # FCA Eligibility Breakdown
+    st.subheader("FCA Eligibility Analysis")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        # Eligibility pie chart
+        status_data = pd.DataFrame({
+            'Status': ['Eligible', 'Not Eligible'],
+            'Count': [eligible_claims, not_eligible]
+        })
+
+        fig_pie = px.pie(
+            status_data,
+            values='Count',
+            names='Status',
+            title='FCA Eligibility Status',
+            color='Status',
+            color_discrete_map={'Eligible': '#28a745', 'Not Eligible': '#dc3545'}
+        )
+        fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+        st.plotly_chart(fig_pie, use_container_width=True)
+
+    with col2:
+        # Recommendation breakdown
+        recommendations = [v.get('recommendation', 'Unknown').split('-')[0].strip() for v in eligibility.values()]
+        rec_counts = pd.Series(recommendations).value_counts()
+
+        fig_bar = px.bar(
+            x=rec_counts.index,
+            y=rec_counts.values,
+            title='Recommendation Distribution',
+            labels={'x': 'Recommendation', 'y': 'Count'},
+            color=rec_counts.values,
+            color_continuous_scale='Blues'
+        )
+        st.plotly_chart(fig_bar, use_container_width=True)
+
+    # Detailed Claims Table
+    st.subheader("Detailed Claims Status")
+
+    claims_data = []
+    for claim_id, result in eligibility.items():
+        claim_obj = agent.claims_data.get(claim_id)
+        if claim_obj:
+            claims_data.append({
+                'Claim ID': claim_id,
+                'Claimant': claim_obj.claimant_name,
+                'Defendant': claim_obj.defendant,
+                'Claim Value': f"£{claim_obj.claim_amount:,.2f}",
+                'Funded': f"£{claim_obj.funded_amount:,.2f}",
+                'Eligible': '✅ Yes' if result.get('eligible') else '❌ No',
+                'Commission Met': '✅' if result.get('commission_threshold_met') else '❌',
+                'Date Valid': '✅' if result.get('date_checks_passed') else '❌',
+                'Recommendation': result.get('recommendation', '')[:40] + '...'
+            })
+
+    if claims_data:
+        df = pd.DataFrame(claims_data)
+        st.dataframe(df, use_container_width=True)
+
+        # Download option
+        csv = df.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Claims Data (CSV)",
+            data=csv,
+            file_name="claims_analysis.csv",
+            mime="text/csv"
+        )
+
+    # Warnings and Issues
+    if not_eligible > 0:
+        st.subheader("⚠️ Claims Requiring Attention")
+        flagged_claims = [(cid, res) for cid, res in eligibility.items() if not res.get('eligible')]
+
+        for claim_id, result in flagged_claims[:5]:  # Show first 5
+            with st.expander(f"❌ Claim {claim_id}"):
+                claim_obj = agent.claims_data.get(claim_id)
+                if claim_obj:
+                    st.write(f"**Claimant:** {claim_obj.claimant_name}")
+                    st.write(f"**Defendant:** {claim_obj.defendant}")
+                    st.write(f"**Value:** £{claim_obj.claim_amount:,.2f}")
+                st.write(f"**Issue:** {result.get('recommendation', 'Unknown')}")
+
+                if result.get('reasons'):
+                    st.write("**Reasons:**")
+                    for reason in result.get('reasons', []):
+                        st.write(f"- {reason}")
+
+
 # Main App
 def main():
     st.markdown('<p class="main-header">📊 PCP Claims Analysis Dashboard</p>', unsafe_allow_html=True)
@@ -903,46 +1134,26 @@ def main():
         st.markdown("---")
 
         # Tabs for different views
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
-            "📊 Overview",
-            "✅ Eligibility Analysis",
-            "📦 Bundle Tracker",
-            "📋 Claims Detail",
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "🏦 Lenders & Defendants",
+            "📊 Claims Statistics",
+            "💰 Financial Analysis",
             "📄 Export Report"
         ])
 
         with tab1:
-            st.header("Financial Overview")
-            create_financial_overview(summary)
+            st.header("Lenders & Defendants Distribution")
+            create_lender_analysis(summary, agent)
 
         with tab2:
-            st.header("FCA Eligibility Analysis")
-            create_eligibility_charts(summary)
-
-            # Eligibility summary table
-            st.subheader("Eligibility Summary by Claim")
-            eligibility = summary.get('claim_eligibility', {})
-            if eligibility:
-                summary_data = []
-                for claim_id, result in eligibility.items():
-                    summary_data.append({
-                        'Claim ID': claim_id,
-                        'Eligible': '✅' if result.get('eligible') else '❌',
-                        'Recommendation': result.get('recommendation', '')[:50] + '...',
-                        'Commission Check': '✅' if result.get('commission_threshold_met') else '❌',
-                        'Date Check': '✅' if result.get('date_checks_passed') else '❌'
-                    })
-                st.dataframe(pd.DataFrame(summary_data), use_container_width=True)
+            st.header("Claims Pipeline & Statistics")
+            create_claims_statistics(summary, agent)
 
         with tab3:
-            st.header("Bundle Performance Analysis")
-            create_bundle_analysis(summary)
+            st.header("Financial Overview & Performance")
+            create_financial_overview(summary)
 
         with tab4:
-            st.header("Detailed Claims View")
-            create_claims_detail_view(summary, agent)
-
-        with tab5:
             st.header("Export Reports")
 
             col1, col2 = st.columns(2)
