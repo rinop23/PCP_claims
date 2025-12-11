@@ -138,21 +138,42 @@ st.markdown("""
 def create_summary_metrics(summary, agent):
     """Create summary metrics display with profit calculations"""
 
+    ps = summary.get('portfolio_summary', {})
+
     # Calculate profit metrics
     calc = ProfitCalculator()
-    claims_list = []
-    for claim_id, claim_obj in agent.claims_data.items():
-        claims_list.append({
-            'claim_amount': claim_obj.claim_amount,
-            'funded_amount': claim_obj.funded_amount
-        })
 
-    profit_metrics = calc.calculate_portfolio_metrics(claims_list) if claims_list else {}
+    # Check if we have individual claims data (old format)
+    if agent.claims_data:
+        claims_list = []
+        for claim_id, claim_obj in agent.claims_data.items():
+            claims_list.append({
+                'claim_amount': claim_obj.claim_amount,
+                'funded_amount': claim_obj.funded_amount
+            })
+        profit_metrics = calc.calculate_portfolio_metrics(claims_list)
+    else:
+        # Use portfolio_summary data from new Monthly Summary format
+        total_claim_value = ps.get('total_claim_value', 0)
+        total_funded = ps.get('total_funded', 0)
+
+        # Calculate DBA proceeds and profit split
+        dba_proceeds = calc.calculate_dba_proceeds(total_claim_value)
+        profit_split = calc.calculate_profit_split(dba_proceeds)
+        funder_moic = calc.calculate_moic(profit_split['funder_share'], total_funded)
+
+        profit_metrics = {
+            'total_claims_value': total_claim_value,
+            'total_funded': total_funded,
+            'dba_proceeds': dba_proceeds,
+            'funder_collection': profit_split['funder_share'],
+            'milberg_collection': profit_split['milberg_share'],
+            'funder_moic': funder_moic,
+            'profit_margin': ((profit_split['funder_share'] - total_funded) / total_funded * 100) if total_funded > 0 else 0
+        }
 
     # Top row - Main KPIs
     col1, col2, col3, col4, col5 = st.columns(5)
-
-    ps = summary.get('portfolio_summary', {})
 
     with col1:
         st.metric(
@@ -216,16 +237,27 @@ def create_summary_metrics(summary, agent):
         )
 
     with col3:
-        # Calculate eligibility rate
+        # Calculate eligibility rate or use portfolio data
         eligibility = summary.get('claim_eligibility', {})
-        eligible_count = sum(1 for v in eligibility.values() if v.get('eligible'))
-        total_checked = len(eligibility)
-        rate = (eligible_count / total_checked * 100) if total_checked > 0 else 0
-        st.metric(
-            "FCA Eligibility Rate",
-            f"{rate:.0f}%",
-            f"{eligible_count}/{total_checked} Eligible"
-        )
+        if eligibility:
+            eligible_count = sum(1 for v in eligibility.values() if v.get('eligible'))
+            total_checked = len(eligibility)
+            rate = (eligible_count / total_checked * 100) if total_checked > 0 else 0
+            st.metric(
+                "FCA Eligibility Rate",
+                f"{rate:.0f}%",
+                f"{eligible_count}/{total_checked} Eligible"
+            )
+        else:
+            # Use success rate from portfolio summary
+            claims_submitted = ps.get('total_claims_submitted', 0)
+            claims_successful = ps.get('claims_successful', 0)
+            success_rate = (claims_successful / claims_submitted * 100) if claims_submitted > 0 else 0
+            st.metric(
+                "Success Rate",
+                f"{success_rate:.0f}%",
+                f"{claims_successful}/{claims_submitted} Successful"
+            )
 
     with col4:
         profit_margin = profit_metrics.get('profit_margin', 0)
