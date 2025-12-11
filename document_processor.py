@@ -972,11 +972,7 @@ IMPORTANT:
         financial = ai_data.get('financial_utilisation', {})
         forecasting = ai_data.get('forecasting', {})
 
-        # Calculate total claim value from lenders
-        total_claim_value = sum(lender.get('estimated_value', 0) for lender in lenders)
-
-        # For Monthly Summary, we don't create synthetic individual claims
-        # We use the aggregate data directly
+        # Use ALL data directly from OpenAI extraction - no calculations
         claims = []
 
         return {
@@ -993,8 +989,8 @@ IMPORTANT:
                 'claims_successful': portfolio.get('claims_successful', 0),
                 'claims_rejected': portfolio.get('claims_rejected', 0),
                 'avg_claim_value': portfolio.get('avg_claim_value', 0),
-                'total_claim_value': total_claim_value,
-                'total_funded': portfolio.get('total_funded', total_claim_value * 0.7),
+                'total_claim_value': portfolio.get('total_claim_value', 0),
+                'total_funded': portfolio.get('total_funded', 0),
                 'report_type': 'Monthly Summary'
             },
             'lender_distribution': lenders,
