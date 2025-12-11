@@ -447,8 +447,85 @@ def create_financial_overview(summary):
     """Create financial overview with charts"""
     ps = summary.get('portfolio_summary', {})
     bundles = summary.get('bundle_tracker', [])
+    financial_util = summary.get('financial_utilisation', {})
+    forecasting = summary.get('forecasting', {})
 
-    # Check if we have real financial data
+    # Check if we have new Monthly Summary format data
+    if financial_util:
+        st.subheader("Financial Utilisation Overview")
+
+        # Cost breakdown metrics
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            acquisition_cost = financial_util.get('acquisition_cost', 0)
+            st.metric("Acquisition Cost", f"£{acquisition_cost:,.0f}")
+
+        with col2:
+            submission_cost = financial_util.get('submission_cost', 0)
+            st.metric("Submission Cost", f"£{submission_cost:,.0f}")
+
+        with col3:
+            processing_cost = financial_util.get('processing_cost', 0)
+            st.metric("Processing Cost", f"£{processing_cost:,.0f}")
+
+        with col4:
+            legal_cost = financial_util.get('legal_cost', 0)
+            st.metric("Legal Cost", f"£{legal_cost:,.0f}")
+
+        # Total costs and balance
+        st.markdown("---")
+        col1, col2 = st.columns(2)
+
+        with col1:
+            total_costs = financial_util.get('total_action_costs', 0)
+            st.metric("Total Action Costs", f"£{total_costs:,.0f}", "Cumulative")
+
+        with col2:
+            balance = financial_util.get('collection_account_balance', 0)
+            st.metric("Collection Account Balance", f"£{balance:,.0f}")
+
+        # Cost breakdown chart
+        if total_costs > 0:
+            st.markdown("---")
+            st.subheader("Cost Breakdown")
+            cost_data = pd.DataFrame({
+                'Category': ['Acquisition', 'Submission', 'Processing', 'Legal'],
+                'Amount': [acquisition_cost, submission_cost, processing_cost, legal_cost]
+            })
+
+            fig_costs = px.bar(
+                cost_data,
+                x='Category',
+                y='Amount',
+                title='Costs by Category',
+                color='Amount',
+                color_continuous_scale='Reds'
+            )
+            st.plotly_chart(fig_costs, use_container_width=True)
+
+        # Forecasting section
+        if forecasting:
+            st.markdown("---")
+            st.subheader("Forecasting")
+
+            col1, col2, col3 = st.columns(3)
+
+            with col1:
+                expected_clients = forecasting.get('expected_new_clients', 0)
+                st.metric("Expected New Clients", expected_clients)
+
+            with col2:
+                expected_submissions = forecasting.get('expected_submissions', 0)
+                st.metric("Expected Submissions", expected_submissions)
+
+            with col3:
+                expected_redress = forecasting.get('expected_redress', 0)
+                st.metric("Expected Redress", f"£{expected_redress:,.0f}")
+
+        return
+
+    # Check if we have real financial data (old format)
     total_funding = ps.get('total_funding_provided', 0)
     total_dba = ps.get('total_dba_proceeds', 0)
     has_financial_data = total_funding > 0 or total_dba > 0
@@ -864,37 +941,57 @@ def create_lender_analysis(summary, agent):
     """Create lender/defendant distribution analysis"""
     st.subheader("Distribution by Lender/Defendant")
 
-    # Extract lender data from claims
-    lender_data = {}
-    for claim_id, claim_obj in agent.claims_data.items():
-        lender = claim_obj.defendant if hasattr(claim_obj, 'defendant') else 'Unknown'
-        if lender not in lender_data:
-            lender_data[lender] = {
-                'count': 0,
-                'total_value': 0,
-                'funded': 0,
-                'claims': []
-            }
-        lender_data[lender]['count'] += 1
-        lender_data[lender]['total_value'] += claim_obj.claim_amount
-        lender_data[lender]['funded'] += claim_obj.funded_amount
-        lender_data[lender]['claims'].append(claim_id)
+    # Check if we have lender_distribution from new Monthly Summary format
+    lender_summary = summary.get('lender_distribution', [])
 
-    if not lender_data:
+    if lender_summary:
+        # Use lender distribution data from new format
+        lender_df = pd.DataFrame([
+            {
+                'Lender/Defendant': lender['lender'],
+                'Number of Claims': lender.get('num_claims', 0),
+                'Total Claim Value': lender.get('estimated_value', 0),
+                'Total Funded': lender.get('estimated_value', 0) * 0.7,  # Assume 70% funding
+                'Avg Claim Value': (lender.get('estimated_value', 0) / lender.get('num_claims', 1)) if lender.get('num_claims', 0) > 0 else 0
+            }
+            for lender in lender_summary
+        ]).sort_values('Total Claim Value', ascending=False)
+    else:
+        # Extract lender data from individual claims (old format)
+        lender_data = {}
+        for claim_id, claim_obj in agent.claims_data.items():
+            lender = claim_obj.defendant if hasattr(claim_obj, 'defendant') else 'Unknown'
+            if lender not in lender_data:
+                lender_data[lender] = {
+                    'count': 0,
+                    'total_value': 0,
+                    'funded': 0,
+                    'claims': []
+                }
+            lender_data[lender]['count'] += 1
+            lender_data[lender]['total_value'] += claim_obj.claim_amount
+            lender_data[lender]['funded'] += claim_obj.funded_amount
+            lender_data[lender]['claims'].append(claim_id)
+
+        if not lender_data:
+            st.info("No lender data available")
+            return
+
+        # Create DataFrame
+        lender_df = pd.DataFrame([
+            {
+                'Lender/Defendant': lender,
+                'Number of Claims': data['count'],
+                'Total Claim Value': data['total_value'],
+                'Total Funded': data['funded'],
+                'Avg Claim Value': data['total_value'] / data['count'] if data['count'] > 0 else 0
+            }
+            for lender, data in lender_data.items()
+        ]).sort_values('Total Claim Value', ascending=False)
+
+    if lender_df.empty:
         st.info("No lender data available")
         return
-
-    # Create DataFrame
-    lender_df = pd.DataFrame([
-        {
-            'Lender/Defendant': lender,
-            'Number of Claims': data['count'],
-            'Total Claim Value': data['total_value'],
-            'Total Funded': data['funded'],
-            'Avg Claim Value': data['total_value'] / data['count'] if data['count'] > 0 else 0
-        }
-        for lender, data in lender_data.items()
-    ]).sort_values('Total Claim Value', ascending=False)
 
     # Calculate percentages
     total_claims = lender_df['Number of Claims'].sum()
@@ -969,7 +1066,68 @@ def create_lender_analysis(summary, agent):
 def create_claims_statistics(summary, agent):
     """Create claims statistics and pipeline analysis"""
 
-    # Get eligibility data
+    # Check if we have portfolio_summary from new Monthly Summary format
+    portfolio = summary.get('portfolio_summary', {})
+    pipeline = summary.get('pipeline_breakdown', {})
+
+    if portfolio:
+        # Use data from new Monthly Summary format
+        st.subheader("Portfolio Overview")
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            total_claims = portfolio.get('total_claims', 0)
+            st.metric("Total Claims", total_claims)
+
+        with col2:
+            claims_submitted = portfolio.get('total_claims_submitted', 0)
+            st.metric("Claims Submitted", claims_submitted)
+
+        with col3:
+            claims_successful = portfolio.get('claims_successful', 0)
+            success_rate = (claims_successful / claims_submitted * 100) if claims_submitted > 0 else 0
+            st.metric("Successful Claims", claims_successful, f"{success_rate:.1f}%")
+
+        with col4:
+            avg_value = portfolio.get('avg_claim_value', 0)
+            st.metric("Avg Claim Value", f"£{avg_value:,.0f}")
+
+        # Claim Pipeline Breakdown
+        if pipeline:
+            st.markdown("---")
+            st.subheader("Claim Pipeline Status")
+
+            pipeline_data = []
+            for stage_key, stage_data in pipeline.items():
+                if isinstance(stage_data, dict):
+                    stage_name = stage_key.replace('_', ' ').title()
+                    pipeline_data.append({
+                        'Stage': stage_name,
+                        'Count': stage_data.get('count', 0),
+                        'Estimated Value': stage_data.get('value', 0)
+                    })
+
+            if pipeline_data:
+                # Pipeline bar chart
+                pipeline_df = pd.DataFrame(pipeline_data)
+                fig_pipeline = px.bar(
+                    pipeline_df,
+                    x='Stage',
+                    y='Count',
+                    title='Claims by Pipeline Stage',
+                    color='Count',
+                    color_continuous_scale='Blues'
+                )
+                st.plotly_chart(fig_pipeline, use_container_width=True)
+
+                # Pipeline table
+                display_df = pipeline_df.copy()
+                display_df['Estimated Value'] = display_df['Estimated Value'].apply(lambda x: f"£{x:,.0f}")
+                st.dataframe(display_df, use_container_width=True)
+
+        return
+
+    # Fall back to old format with eligibility data
     eligibility = summary.get('claim_eligibility', {})
 
     if not eligibility:
