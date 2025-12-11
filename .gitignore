@@ -47,11 +47,13 @@ api_keys.txt
 
 # Uploaded Files and Data
 uploads/
+Uploads/
 *.xlsx
 *.xls
 *.csv
 *.pdf
 !uploads/.gitkeep
+!Uploads/.gitkeep
 
 # Generated Reports
 *.docx
@@ -62,6 +64,7 @@ uploads/
 Priority Deed/
 Milberg Lawfirm Agreement/
 FCA redress scheme/
+DOCS/
 legal_docs/
 *.docx
 *.pdf
