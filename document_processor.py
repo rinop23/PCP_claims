@@ -964,6 +964,63 @@ IMPORTANT:
                 'processed_at': datetime.now().isoformat()
             }
 
+    def _transform_ai_extraction(self, ai_data: Dict[str, Any], file_path: str) -> Dict[str, Any]:
+        """Transform OpenAI extracted data to match expected format"""
+        portfolio = ai_data.get('portfolio_overview', {})
+        lenders = ai_data.get('lender_distribution', [])
+        pipeline = ai_data.get('pipeline_breakdown', {})
+        financial = ai_data.get('financial_utilisation', {})
+        forecasting = ai_data.get('forecasting', {})
+
+        # Calculate total claim value from lenders
+        total_claim_value = sum(lender.get('estimated_value', 0) for lender in lenders)
+
+        # Generate synthetic claims from lenders for compatibility
+        claims = []
+        for lender in lenders:
+            lender_name = lender.get('lender', 'Unknown')
+            num_claims = int(lender.get('num_claims', 0))
+            est_value = lender.get('estimated_value', 0)
+            avg_per_claim = est_value / num_claims if num_claims > 0 else 0
+
+            for i in range(num_claims):
+                claim_id = f"{lender_name.upper().replace(' ', '_').replace('(', '').replace(')', '').replace('/', '_')}_{i+1}"
+                claims.append({
+                    'claim_id': claim_id,
+                    'claimant_id': claim_id,
+                    'defendant': lender_name,
+                    'law_firm': 'Milberg',
+                    'status': 'in_progress',
+                    'claim_amount': avg_per_claim,
+                    'funded_amount': avg_per_claim * 0.7,
+                    'source': 'ai_lender_distribution'
+                })
+
+        return {
+            'report_type': 'Milberg Monthly Summary',
+            'processed_at': ai_data.get('processed_at'),
+            'source_file': file_path,
+            'extraction_method': 'openai_analysis',
+            'claims': claims,
+            'total_claims': len(claims),
+            'portfolio_summary': {
+                'total_claims': portfolio.get('total_claims', len(claims)),
+                'total_claimants': portfolio.get('total_claimants', 0),
+                'total_claims_submitted': portfolio.get('total_claims_submitted', 0),
+                'claims_successful': portfolio.get('claims_successful', 0),
+                'claims_rejected': portfolio.get('claims_rejected', 0),
+                'avg_claim_value': portfolio.get('avg_claim_value', 0),
+                'total_claim_value': total_claim_value,
+                'total_funded': portfolio.get('total_funded', total_claim_value * 0.7),
+                'report_type': 'Monthly Summary'
+            },
+            'lender_distribution': lenders,
+            'pipeline_breakdown': pipeline,
+            'financial_utilisation': financial,
+            'forecasting': forecasting,
+            'bundle_tracker': []
+        }
+
     def _get_excel_value(self, worksheet, row: int, col: int):
         """Helper to safely get numeric value from Excel cell"""
         try:
@@ -994,7 +1051,19 @@ IMPORTANT:
 
             # Check if it's the new Monthly Summary format (single sheet)
             if 'Monthly Summary' in xl.sheet_names and len(xl.sheet_names) == 1:
-                return self.extract_from_excel_monthly_summary(file_path)
+                # Use OpenAI-powered intelligent extraction
+                print("[Info] Using OpenAI to analyze Monthly Summary Excel")
+                try:
+                    from intelligent_excel_analyzer import IntelligentExcelAnalyzer
+                    analyzer = IntelligentExcelAnalyzer()
+                    ai_extracted = analyzer.analyze_excel_with_ai(file_path)
+
+                    # Transform AI extracted data to match expected format
+                    return self._transform_ai_extraction(ai_extracted, file_path)
+                except Exception as e:
+                    print(f"[Warning] OpenAI extraction failed: {e}")
+                    print("[Info] Falling back to manual extraction")
+                    return self.extract_from_excel_monthly_summary(file_path)
 
             # Otherwise, check if it's the old multi-sheet format
             is_milberg = 'Bundle Tracker' in xl.sheet_names and 'Portfolio Summary' in xl.sheet_names
