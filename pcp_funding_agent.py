@@ -55,12 +55,17 @@ class ClaimData:
     defendant: str
     claim_amount: float
     funded_amount: float
-    claim_date: str
-    status: str
-    law_firm: str
-    case_reference: str
-    documentation_received: List[str]
-    last_update: str
+    claim_date: str = ""
+    status: str = ""
+    law_firm: str = ""
+    case_reference: str = ""
+    documentation_received: List[str] = None
+    last_update: str = ""
+    claimant_id: str = ""  # Added for new Excel format
+
+    def __post_init__(self):
+        if self.documentation_received is None:
+            self.documentation_received = []
 
 
 @dataclass
@@ -354,7 +359,13 @@ class PCPFundingAgent:
             'portfolio_summary': extracted_data.get('portfolio_summary', {}),
             'bundle_tracker': extracted_data.get('bundle_tracker', []),
             'claim_eligibility': {cid: eligibility.__dict__ for cid, eligibility in claim_eligibility.items()},
-            'claim_profits': claim_profits
+            'claim_profits': claim_profits,
+            # Add Monthly Summary format data
+            'lender_distribution': extracted_data.get('lender_distribution', []),
+            'pipeline_breakdown': extracted_data.get('pipeline_breakdown', {}),
+            'financial_utilisation': extracted_data.get('financial_utilisation', {}),
+            'forecasting': extracted_data.get('forecasting', {}),
+            'extraction_method': extracted_data.get('extraction_method', 'unknown')
         }
 
         file_type = file_path.lower().split('.')[-1]
