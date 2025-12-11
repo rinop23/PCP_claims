@@ -975,26 +975,9 @@ IMPORTANT:
         # Calculate total claim value from lenders
         total_claim_value = sum(lender.get('estimated_value', 0) for lender in lenders)
 
-        # Generate synthetic claims from lenders for compatibility
+        # For Monthly Summary, we don't create synthetic individual claims
+        # We use the aggregate data directly
         claims = []
-        for lender in lenders:
-            lender_name = lender.get('lender', 'Unknown')
-            num_claims = int(lender.get('num_claims', 0))
-            est_value = lender.get('estimated_value', 0)
-            avg_per_claim = est_value / num_claims if num_claims > 0 else 0
-
-            for i in range(num_claims):
-                claim_id = f"{lender_name.upper().replace(' ', '_').replace('(', '').replace(')', '').replace('/', '_')}_{i+1}"
-                claims.append({
-                    'claim_id': claim_id,
-                    'claimant_id': claim_id,
-                    'defendant': lender_name,
-                    'law_firm': 'Milberg',
-                    'status': 'in_progress',
-                    'claim_amount': avg_per_claim,
-                    'funded_amount': avg_per_claim * 0.7,
-                    'source': 'ai_lender_distribution'
-                })
 
         return {
             'report_type': 'Milberg Monthly Summary',
@@ -1002,9 +985,9 @@ IMPORTANT:
             'source_file': file_path,
             'extraction_method': 'openai_analysis',
             'claims': claims,
-            'total_claims': len(claims),
+            'total_claims': portfolio.get('total_claims', 0),
             'portfolio_summary': {
-                'total_claims': portfolio.get('total_claims', len(claims)),
+                'total_claims': portfolio.get('total_claims', 0),
                 'total_claimants': portfolio.get('total_claimants', 0),
                 'total_claims_submitted': portfolio.get('total_claims_submitted', 0),
                 'claims_successful': portfolio.get('claims_successful', 0),

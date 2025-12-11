@@ -176,11 +176,21 @@ def create_summary_metrics(summary, agent):
     col1, col2, col3, col4, col5 = st.columns(5)
 
     with col1:
-        st.metric(
-            "Total Claims",
-            f"{summary.get('total_found', 0)}",
-            f"{summary.get('ingested', 0)} Processed"
-        )
+        # Use actual portfolio data if available (Monthly Summary format)
+        if ps and ps.get('total_claims'):
+            total_claims = ps.get('total_claims', 0)
+            st.metric(
+                "Total Claims",
+                f"{total_claims}",
+                f"Cumulative"
+            )
+        else:
+            # Fall back to extracted claims count (old format)
+            st.metric(
+                "Total Claims",
+                f"{summary.get('total_found', 0)}",
+                f"{summary.get('ingested', 0)} Processed"
+            )
 
     with col2:
         total_funding = profit_metrics.get('total_funded', ps.get('total_funding_provided', 0))
