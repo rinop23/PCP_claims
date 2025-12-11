@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import json
 from pcp_funding_agent import PCPFundingAgent
+from profit_calculator import ProfitCalculator, get_priority_deed_summary
 from docx import Document
 import os
 from datetime import datetime
@@ -135,8 +136,21 @@ st.markdown("""
 
 
 def create_summary_metrics(summary, agent):
-    """Create summary metrics display"""
-    col1, col2, col3, col4 = st.columns(4)
+    """Create summary metrics display with profit calculations"""
+
+    # Calculate profit metrics
+    calc = ProfitCalculator()
+    claims_list = []
+    for claim_id, claim_obj in agent.claims_data.items():
+        claims_list.append({
+            'claim_amount': claim_obj.claim_amount,
+            'funded_amount': claim_obj.funded_amount
+        })
+
+    profit_metrics = calc.calculate_portfolio_metrics(claims_list) if claims_list else {}
+
+    # Top row - Main KPIs
+    col1, col2, col3, col4, col5 = st.columns(5)
 
     ps = summary.get('portfolio_summary', {})
 
@@ -148,22 +162,60 @@ def create_summary_metrics(summary, agent):
         )
 
     with col2:
-        total_funding = ps.get('total_funding_provided', 0)
+        total_funding = profit_metrics.get('total_funded', ps.get('total_funding_provided', 0))
         st.metric(
-            "Total Funding",
+            "Total Funded",
             f"£{total_funding:,.0f}",
-            f"£{ps.get('outstanding_funding', 0):,.0f} Outstanding"
+            "Investment"
         )
 
     with col3:
-        dba_proceeds = ps.get('total_dba_proceeds', 0)
+        dba_proceeds = profit_metrics.get('dba_proceeds', 0)
         st.metric(
-            "DBA Proceeds",
+            "DBA Proceeds (30%)",
             f"£{dba_proceeds:,.0f}",
-            f"£{ps.get('funder_total_share', 0):,.0f} Funder Share"
+            "30% of Claims"
         )
 
     with col4:
+        funder_collection = profit_metrics.get('funder_collection', 0)
+        st.metric(
+            "Funder Collection (80%)",
+            f"£{funder_collection:,.0f}",
+            "80% of DBA"
+        )
+
+    with col5:
+        moic = profit_metrics.get('funder_moic', 0)
+        moic_color = "normal" if moic >= 1.0 else "inverse"
+        st.metric(
+            "Funder MOIC",
+            f"{moic:.2f}x",
+            f"{'Profit' if moic > 1.0 else 'Loss' if moic < 1.0 else 'Break-even'}",
+            delta_color=moic_color
+        )
+
+    # Second row - Additional metrics
+    st.markdown("---")
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        milberg_collection = profit_metrics.get('milberg_collection', 0)
+        st.metric(
+            "Milberg Collection (20%)",
+            f"£{milberg_collection:,.0f}",
+            "20% of DBA"
+        )
+
+    with col2:
+        total_claims_value = profit_metrics.get('total_claims_value', 0)
+        st.metric(
+            "Total Claims Value",
+            f"£{total_claims_value:,.0f}",
+            "Successful Claims"
+        )
+
+    with col3:
         # Calculate eligibility rate
         eligibility = summary.get('claim_eligibility', {})
         eligible_count = sum(1 for v in eligibility.values() if v.get('eligible'))
@@ -173,6 +225,14 @@ def create_summary_metrics(summary, agent):
             "FCA Eligibility Rate",
             f"{rate:.0f}%",
             f"{eligible_count}/{total_checked} Eligible"
+        )
+
+    with col4:
+        profit_margin = profit_metrics.get('profit_margin', 0)
+        st.metric(
+            "Profit Margin",
+            f"{profit_margin:.1f}%",
+            "ROI"
         )
 
 
@@ -490,9 +550,82 @@ def create_docx_report(summary, agent, docx_path):
     doc.add_paragraph(f"Report Date: {ps.get('report_date', 'N/A')}")
     doc.add_paragraph(f"Total Claims Processed: {summary.get('ingested', 0)}")
     doc.add_paragraph(f"Eligible Claims: {eligible_count} ({(eligible_count/len(eligibility)*100):.1f}%)" if eligibility else "N/A")
-    doc.add_paragraph(f"Total Funding Provided: £{ps.get('total_funding_provided', 0):,.2f}")
-    doc.add_paragraph(f"Total DBA Proceeds: £{ps.get('total_dba_proceeds', 0):,.2f}")
-    doc.add_paragraph(f"Funder Total Share: £{ps.get('funder_total_share', 0):,.2f}")
+    doc.add_paragraph("")
+
+    # Calculate profit metrics
+    calc = ProfitCalculator()
+    claims_list = []
+    for claim_id, claim_obj in agent.claims_data.items():
+        claims_list.append({
+            'claim_amount': claim_obj.claim_amount,
+            'funded_amount': claim_obj.funded_amount
+        })
+    profit_metrics = calc.calculate_portfolio_metrics(claims_list) if claims_list else {}
+
+    # Profit Distribution & Returns Analysis
+    doc.add_heading('💰 Profit Distribution & Returns Analysis', level=1)
+
+    doc.add_paragraph("Based on Priority Deed terms:")
+    doc.add_paragraph("")
+
+    # Key metrics
+    doc.add_paragraph(f"Total Claims Value: £{profit_metrics.get('total_claims_value', 0):,.2f}")
+    doc.add_paragraph(f"Total Funded by Funder: £{profit_metrics.get('total_funded', 0):,.2f}")
+    doc.add_paragraph("")
+
+    doc.add_paragraph(f"DBA Proceeds (30% of claims): £{profit_metrics.get('dba_proceeds', 0):,.2f}")
+    doc.add_paragraph("")
+
+    # Profit split table
+    doc.add_heading('Profit Split from DBA Proceeds', level=2)
+    split_table = doc.add_table(rows=1, cols=3)
+    split_table.style = 'Light Grid Accent 1'
+    hdr_cells = split_table.rows[0].cells
+    hdr_cells[0].text = 'Recipient'
+    hdr_cells[1].text = 'Percentage'
+    hdr_cells[2].text = 'Amount (£)'
+
+    # Funder row
+    row_cells = split_table.add_row().cells
+    row_cells[0].text = 'Funder Collection'
+    row_cells[1].text = '80%'
+    row_cells[2].text = f"£{profit_metrics.get('funder_collection', 0):,.2f}"
+
+    # Milberg row
+    row_cells = split_table.add_row().cells
+    row_cells[0].text = 'Milberg Collection'
+    row_cells[1].text = '20%'
+    row_cells[2].text = f"£{profit_metrics.get('milberg_collection', 0):,.2f}"
+
+    doc.add_paragraph("")
+
+    # MOIC and Returns
+    doc.add_heading('Investment Returns (MOIC)', level=2)
+    moic = profit_metrics.get('funder_moic', 0)
+    profit_margin = profit_metrics.get('profit_margin', 0)
+
+    doc.add_paragraph(f"Funder MOIC (Multiple on Invested Capital): {moic:.2f}x")
+    doc.add_paragraph(f"Profit Margin: {profit_margin:.1f}%")
+    doc.add_paragraph("")
+
+    if moic > 1.0:
+        doc.add_paragraph(f"✓ PROFITABLE: Funder earning {(moic-1)*100:.1f}% return on investment")
+    elif moic == 1.0:
+        doc.add_paragraph("= BREAK-EVEN: Funder recovering exactly the investment")
+    else:
+        doc.add_paragraph(f"✗ LOSS: Funder not yet recovering full investment ({(1-moic)*100:.1f}% shortfall)")
+
+    doc.add_paragraph("")
+
+    # Priority Deed explanation
+    doc.add_heading('Priority Deed Payment Structure', level=2)
+    doc.add_paragraph("Payment Waterfall (in order of priority):")
+    doc.add_paragraph("1. Outstanding Costs Sum → Paid to Funder", style='List Bullet')
+    doc.add_paragraph("2. First Tier Funder Return → Paid to Funder", style='List Bullet')
+    doc.add_paragraph("3. Distribution Costs Overrun → Paid to Firm (Milberg)", style='List Bullet')
+    doc.add_paragraph("4. Net Proceeds Split → 80% Funder / 20% Milberg", style='List Bullet')
+    doc.add_paragraph("")
+    doc.add_paragraph("Note: DBA Proceeds represent 30% of successful claim amounts. The remaining 70% is distributed to claimants.")
     doc.add_paragraph("")
 
     # Portfolio Summary
