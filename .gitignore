@@ -1,0 +1,90 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.claude/
+
+# Sensitive Files - DO NOT COMMIT
+.env
+.env.local
+*.key
+*.pem
+config.json
+secrets.json
+credentials.json
+api_keys.txt
+
+# Uploaded Files and Data
+uploads/
+*.xlsx
+*.xls
+*.csv
+*.pdf
+!uploads/.gitkeep
+
+# Generated Reports
+*.docx
+*_analysis_report.docx
+*_analysis.json
+
+# Legal Documents (if they contain sensitive info)
+Priority Deed/
+Milberg Lawfirm Agreement/
+FCA redress scheme/
+legal_docs/
+*.docx
+*.pdf
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary Files
+temp/
+tmp/
+*.tmp
+
+# OS Files
+Thumbs.db
+.DS_Store
+
+# Test outputs
+test_*.docx
+test_*.json
+test_output/
