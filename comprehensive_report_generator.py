@@ -78,6 +78,12 @@ class ComprehensiveReportGenerator:
         # Recommendations
         self._add_recommendations(doc, extracted_data)
 
+        # DBA Proceeds Distribution
+        self._add_dba_distribution_section(doc, extracted_data)
+
+        # DBA proceeds split section
+        self._add_dba_distribution_section(doc, extracted_data)
+
         # Save document
         doc.save(output_path)
         print(f"[Success] Comprehensive report saved to: {output_path}")
@@ -512,6 +518,34 @@ The collection account currently holds £{collection_balance:,.2f}.
             """
             doc.add_paragraph(summary_text.strip())
 
+        doc.add_paragraph()
+
+    def _add_dba_distribution_section(self, doc, data: Dict[str, Any]):
+        """Add detailed DBA proceeds split waterfall table as per Priorities Deed"""
+        doc.add_heading("DBA Proceeds Distribution (Priorities Deed Waterfall)", level=1)
+        ps = data.get('portfolio_summary', {})
+        dba_split = ps.get('dba_distribution_details', None)
+        if dba_split:
+            table = doc.add_table(rows=1, cols=2)
+            table.style = 'Light Grid Accent 1'
+            hdr_cells = table.rows[0].cells
+            hdr_cells[0].text = 'Recipient'
+            hdr_cells[1].text = 'Amount (£)'
+            rows = [
+                ('Funder (Outstanding Costs Sum)', dba_split['outstanding_costs_sum']),
+                ('Funder (First Tier Funder Return)', dba_split['first_tier_funder_return']),
+                ('Firm (Distribution Costs Overrun)', dba_split['distribution_costs_overrun']),
+                ('Funder (80% of Net Proceeds)', dba_split['net_proceeds'] * 0.8),
+                ('Milberg (20% of Net Proceeds)', dba_split['net_proceeds'] * 0.2 - dba_split['claims_processor_share']),
+                ('Claims Processor (50% of Milberg Share)', dba_split['claims_processor_share'])
+            ]
+            for recipient, amount in rows:
+                row_cells = table.add_row().cells
+                row_cells[0].text = recipient
+                row_cells[1].text = f"£{amount:,.2f}"
+            doc.add_paragraph("Calculated as per Priorities Deed: Outstanding Costs, Funder Return, Distribution Overrun, then 80/20 split of Net Proceeds (with half of Milberg share to Claims Processor).")
+        else:
+            doc.add_paragraph("No DBA proceeds split data available.")
         doc.add_paragraph()
 
     def _cleanup_charts(self):

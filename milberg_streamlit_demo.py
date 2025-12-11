@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -472,6 +471,31 @@ def create_financial_overview(summary):
             })
             st.table(metrics_df)
 
+        # Show DBA proceeds split details if available
+        if 'dba_distribution_details' in ps:
+            st.markdown('### DBA Proceeds Split (Priorities Deed Waterfall)')
+            dba_split = ps['dba_distribution_details']
+            split_df = pd.DataFrame({
+                'Recipient': [
+                    'Funder (Outstanding Costs Sum)',
+                    'Funder (First Tier Funder Return)',
+                    'Firm (Distribution Costs Overrun)',
+                    'Funder (80% of Net Proceeds)',
+                    'Milberg (20% of Net Proceeds)',
+                    'Claims Processor (50% of Milberg Share)'
+                ],
+                'Amount (£)': [
+                    dba_split['outstanding_costs_sum'],
+                    dba_split['first_tier_funder_return'],
+                    dba_split['distribution_costs_overrun'],
+                    dba_split['net_proceeds'] * 0.8,
+                    dba_split['net_proceeds'] * 0.2 - dba_split['claims_processor_share'],
+                    dba_split['claims_processor_share']
+                ]
+            })
+            st.table(split_df)
+            st.caption('Calculated as per Priorities Deed: Outstanding Costs, Funder Return, Distribution Overrun, then 80/20 split of Net Proceeds (with half of Milberg share to Claims Processor).')
+
 
 def create_docx_report(summary, agent, docx_path):
     """Create comprehensive DOCX report with embedded charts using matplotlib"""
@@ -598,30 +622,6 @@ def create_docx_report(summary, agent, docx_path):
             # Check if required columns exist and have data
             if 'bundle_id' in df_bundles.columns and 'funding_drawn' in df_bundles.columns:
                 # Filter out bundles with zero or null funding
-                df_bundles_filtered = df_bundles[df_bundles['funding_drawn'].fillna(0) > 0]
-
-                if len(df_bundles_filtered) > 0:
-                    # Create matplotlib bar chart
-                    fig, ax = plt.subplots(figsize=(10, 6))
-                    bars = ax.bar(df_bundles_filtered['bundle_id'], df_bundles_filtered['funding_drawn'], color='#2ca02c')
-                    ax.set_xlabel('Bundle ID')
-                    ax.set_ylabel('Funding (£)')
-                    ax.set_title('Funding Drawn by Bundle', fontsize=14, fontweight='bold')
-                    plt.xticks(rotation=45, ha='right')
-                    plt.tight_layout()
-
-                    # Save to temp file
-                    temp_img = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
-                    plt.savefig(temp_img.name, dpi=150, bbox_inches='tight')
-                    plt.close()
-
-                    # Add to document
-                    doc.add_heading('Funding by Bundle', level=2)
-                    doc.add_picture(temp_img.name, width=Inches(5.5))
-                    doc.add_paragraph("")
-
-                    # Clean up temp file
-                    os.unlink(temp_img.name)
                 else:
                     doc.add_paragraph("No bundle funding data available to chart.")
                     doc.add_paragraph("")

@@ -86,6 +86,46 @@ class ComplianceCheck:
     recommendation: Optional[str] = None
 
 
+def calculate_dba_distribution(
+    net_dba_proceeds: float,
+    outstanding_costs_sum: float,
+    first_tier_funder_return: float,
+    distribution_costs_overrun: float = 0.0
+) -> dict:
+    """
+    Calculate the distribution of Net DBA Proceeds according to Priorities Deed waterfall:
+    1. Pay Outstanding Costs Sum to Funder
+    2. Pay First Tier Funder Return to Funder
+    3. Pay Distribution Costs Overrun to Firm
+    4. Split remaining Net Proceeds: 80% Funder, 20% Firm (half of Firm's share to Claims Processor)
+    Returns a dict with breakdown.
+    """
+    # Step 1: Pay Outstanding Costs Sum
+    step1 = min(net_dba_proceeds, outstanding_costs_sum)
+    remaining = net_dba_proceeds - step1
+    # Step 2: Pay First Tier Funder Return
+    step2 = min(remaining, first_tier_funder_return)
+    remaining -= step2
+    # Step 3: Pay Distribution Costs Overrun
+    step3 = min(remaining, distribution_costs_overrun)
+    remaining -= step3
+    # Step 4: Split remaining Net Proceeds
+    net_proceeds = max(remaining, 0)
+    funder_share = step1 + step2 + (net_proceeds * 0.8)
+    firm_share = step3 + (net_proceeds * 0.2)
+    claims_processor_share = firm_share * 0.5
+    firm_final_share = firm_share - claims_processor_share
+    return {
+        "funder_share": funder_share,
+        "firm_share": firm_final_share,
+        "claims_processor_share": claims_processor_share,
+        "outstanding_costs_sum": step1,
+        "first_tier_funder_return": step2,
+        "distribution_costs_overrun": step3,
+        "net_proceeds": net_proceeds
+    }
+
+
 class PCPFundingAgent:
     """Main agent for managing PCP claim funding"""
     
@@ -286,6 +326,24 @@ class PCPFundingAgent:
                         except Exception as e:
                             print(f"Warning: Could not ingest claim: {str(e)}")
                             skipped_count += 1
+
+        # Calculate DBA proceeds split using Priorities Deed waterfall
+        # Extract required values from portfolio_summary
+        ps = extracted_data.get('portfolio_summary', {})
+        net_dba_proceeds = ps.get('total_dba_proceeds', 0)
+        outstanding_costs_sum = ps.get('outstanding_costs_sum', 0)
+        first_tier_funder_return = ps.get('first_tier_funder_return', 0)
+        distribution_costs_overrun = ps.get('distribution_costs_overrun', 0)
+        dba_split = calculate_dba_distribution(
+            net_dba_proceeds,
+            outstanding_costs_sum,
+            first_tier_funder_return,
+            distribution_costs_overrun
+        )
+        ps['funder_total_share'] = dba_split['funder_share']
+        ps['milberg_total_share'] = dba_split['firm_share']
+        ps['claims_processor_share'] = dba_split['claims_processor_share']
+        ps['dba_distribution_details'] = dba_split
 
         summary = {
             'file_path': file_path,
