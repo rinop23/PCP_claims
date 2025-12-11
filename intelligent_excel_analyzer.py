@@ -115,7 +115,7 @@ Expected JSON structure:
                     }
                 ],
                 temperature=0.1,
-                max_tokens=4000
+                max_tokens=8000
             )
 
             # Parse response
@@ -149,9 +149,9 @@ Expected JSON structure:
         prompt = "Analyze the following Excel spreadsheet data and extract structured information.\n\n"
 
         for sheet_name, sheet_content in sheets_data.items():
-            # Truncate very long sheets
-            if len(sheet_content) > 5000:
-                sheet_content = sheet_content[:5000] + "\n... [truncated]"
+            # Truncate very long sheets but keep more for lender data
+            if len(sheet_content) > 15000:
+                sheet_content = sheet_content[:15000] + "\n... [truncated]"
 
             prompt += f"=== SHEET: {sheet_name} ===\n{sheet_content}\n\n"
 
@@ -170,11 +170,12 @@ Extract the following information:
    - Calculate total_claim_value from lender distribution
    - Calculate total_funded (assume 70% of total_claim_value if not specified)
 
-4. **Lender Distribution**: Extract all lenders with:
-   - Lender name
-   - Number of claims
-   - Percentage of total
-   - Estimated value (convert currency strings to numbers)
+4. **Lender Distribution**: IMPORTANT - Extract ALL lenders from the table (there are typically 50-70 lenders):
+   - Lender name (exactly as shown)
+   - Number of claims (integer)
+   - Percentage of total (as decimal, e.g., 1.1% → 0.011)
+   - Estimated value (convert £X,XXX.XX to numeric value)
+   - DO NOT skip any rows - include every lender in the table until you reach the next section
 
 5. **Claim Pipeline**: Extract counts and values for each stage:
    - Awaiting DSAR

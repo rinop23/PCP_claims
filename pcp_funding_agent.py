@@ -268,7 +268,8 @@ class PCPFundingAgent:
         claim_profits = {}
 
         # Check if this is a Milberg report with multiple claims
-        if extracted_data.get('report_type') == 'Milberg Monthly Report':
+        report_type = extracted_data.get('report_type', '')
+        if report_type in ['Milberg Monthly Report', 'Milberg Monthly Summary']:
             claims = extracted_data.get('claims', [])
             for claim_data in claims:
                 # Only ingest claims with valid data
