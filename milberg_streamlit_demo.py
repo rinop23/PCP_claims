@@ -1318,6 +1318,20 @@ def main():
 
         st.success(f"✅ Report processed successfully! {summary.get('ingested', 0)} claims analyzed.")
 
+        # Debug: Show what's in summary
+        with st.expander("🔍 Debug: Summary Data"):
+            st.json({
+                'report_type': summary.get('report_type'),
+                'total_found': summary.get('total_found'),
+                'ingested': summary.get('ingested'),
+                'has_portfolio_summary': bool(summary.get('portfolio_summary')),
+                'has_lender_distribution': bool(summary.get('lender_distribution')),
+                'has_pipeline_breakdown': bool(summary.get('pipeline_breakdown')),
+                'has_financial_utilisation': bool(summary.get('financial_utilisation')),
+                'lender_count': len(summary.get('lender_distribution', [])),
+                'extraction_method': summary.get('extraction_method', 'unknown')
+            })
+
         # Summary metrics
         create_summary_metrics(summary, agent)
 
