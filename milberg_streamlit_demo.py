@@ -820,25 +820,56 @@ def main():
         with tab5:
             st.header("Export Reports")
 
+            # Check if comprehensive report was auto-generated
+            if 'comprehensive_report_path' in summary and os.path.exists(summary['comprehensive_report_path']):
+                st.success("✅ Comprehensive Analysis Report automatically generated!")
+                st.info(f"📄 Report saved to: {os.path.basename(summary['comprehensive_report_path'])}")
+
+                with open(summary['comprehensive_report_path'], "rb") as f:
+                    st.download_button(
+                        "📥 Download Comprehensive Analysis Report",
+                        f,
+                        file_name=os.path.basename(summary['comprehensive_report_path']),
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        type="primary"
+                    )
+
+                st.markdown("---")
+                st.markdown("**The Comprehensive Analysis Report includes:**")
+                st.markdown("""
+                - Executive Summary with key highlights
+                - Portfolio Overview with metrics table
+                - Claims Distribution by Lender (table & chart)
+                - Detailed Claims Information
+                - Visual Analysis with charts:
+                  - Top 10 Lenders by Claims Volume (bar chart)
+                  - Claims Status Distribution (pie chart)
+                - FCA Compliance Analysis
+                - Financial Analysis
+                - Recommendations & Next Steps
+                """)
+
+                st.markdown("---")
+
             col1, col2 = st.columns(2)
 
             with col1:
-                st.subheader("📥 Download DOCX Report")
-                st.write("Comprehensive report with all details")
+                st.subheader("📥 Custom DOCX Report")
+                st.write("Alternative report format")
 
-                if st.button("Generate DOCX Report", type="primary"):
+                if st.button("Generate Custom DOCX", type="secondary"):
                     with st.spinner("Generating report..."):
                         docx_path = f"uploads/{os.path.splitext(uploaded_file.name)[0]}_analysis_report.docx"
                         create_docx_report(summary, agent, docx_path)
 
                         with open(docx_path, "rb") as f:
                             st.download_button(
-                                "📥 Download Report",
+                                "📥 Download Custom Report",
                                 f,
                                 file_name=os.path.basename(docx_path),
                                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                             )
-                    st.success("Report generated!")
+                    st.success("Custom report generated!")
 
             with col2:
                 st.subheader("📊 Download Raw Data")

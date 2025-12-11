@@ -302,6 +302,26 @@ class PCPFundingAgent:
         file_type = file_path.lower().split('.')[-1]
         print(f"✓ {file_type.upper()} report processed: {ingested_count} claims ingested, {skipped_count} skipped")
 
+        # Generate comprehensive analysis report for Word documents
+        if file_type == 'docx':
+            try:
+                from comprehensive_report_generator import ComprehensiveReportGenerator
+                generator = ComprehensiveReportGenerator()
+
+                # Create output filename
+                base_name = os.path.splitext(os.path.basename(file_path))[0]
+                output_path = os.path.join(os.path.dirname(file_path), f"{base_name}_COMPREHENSIVE_ANALYSIS.docx")
+
+                print(f"[Info] Generating comprehensive analysis report...")
+                generator.generate_full_report(summary, output_path)
+                summary['comprehensive_report_path'] = output_path
+                print(f"✓ Comprehensive report generated: {output_path}")
+
+            except Exception as e:
+                print(f"[Warning] Could not generate comprehensive report: {e}")
+                import traceback
+                traceback.print_exc()
+
         return summary
 
     def ingest_excel_report(self, file_path: str) -> Dict[str, Any]:
