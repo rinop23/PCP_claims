@@ -736,8 +736,8 @@ def main():
         st.header("Upload Report")
         uploaded_file = st.file_uploader(
             "Upload Milberg Monthly Report",
-            type=["xlsx"],
-            help="Upload an Excel file containing the Milberg monthly report"
+            type=["xlsx", "xls", "docx"],
+            help="Upload an Excel (.xlsx, .xls) or Word (.docx) file containing the Milberg monthly report"
         )
 
         st.markdown("---")
@@ -757,12 +757,20 @@ def main():
         with open(temp_path, "wb") as f:
             f.write(uploaded_file.getbuffer())
 
-        # Process report
-        with st.spinner("Processing report... This may take a moment."):
-            agent = PCPFundingAgent()
-            summary = agent.ingest_excel_report(temp_path)
+        # Determine file type
+        file_extension = uploaded_file.name.lower().split('.')[-1]
+        file_type_label = {
+            'xlsx': 'Excel',
+            'xls': 'Excel',
+            'docx': 'Word'
+        }.get(file_extension, 'Unknown')
 
-        st.success(f"✅ Report processed successfully! {summary.get('ingested', 0)} claims analyzed.")
+        # Process report
+        with st.spinner(f"Processing {file_type_label} report... This may take a moment."):
+            agent = PCPFundingAgent()
+            summary = agent.ingest_report(temp_path)
+
+        st.success(f"✅ {file_type_label} report processed successfully! {summary.get('ingested', 0)} claims analyzed.")
 
         # Summary metrics
         create_summary_metrics(summary, agent)
