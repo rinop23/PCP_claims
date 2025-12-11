@@ -12,6 +12,8 @@ import json
 import openpyxl
 from openpyxl import load_workbook
 import pandas as pd
+from docx import Document
+import os
 
 # Set stdout encoding to UTF-8 for Windows compatibility
 if sys.platform == 'win32':
@@ -24,9 +26,28 @@ if sys.platform == 'win32':
 
 class DocumentProcessor:
     """Process and extract data from legal documents"""
-    
+
     def __init__(self):
         self.extraction_patterns = self._compile_patterns()
+
+    def call_openai_llm(self, prompt: str, model: str = "gpt-4o", max_tokens: int = 4000, temperature: float = 0.2) -> str:
+        """
+        Call OpenAI ChatCompletion API with a prompt and return the response text.
+        Compatible with openai>=1.0.0
+        """
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            response = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=max_tokens,
+                temperature=temperature
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            print(f"[OpenAI API Error] {e}")
+            return f"[OpenAI API Error: {str(e)}]"
     
     def _compile_patterns(self) -> Dict[str, re.Pattern]:
         """Compile regex patterns for data extraction"""
@@ -465,13 +486,517 @@ class DocumentProcessor:
             traceback.print_exc()
             return []
 
+    def extract_from_word(self, file_path: str) -> Dict[str, Any]:
+        """
+        Extract structured data from Word documents (e.g., Milberg monthly report in .docx format)
+        Uses OpenAI to intelligently parse and structure the document content
+        """
+        try:
+            doc = Document(file_path)
+
+            # Extract all text from paragraphs
+            full_text = []
+            for paragraph in doc.paragraphs:
+                if paragraph.text.strip():
+                    full_text.append(paragraph.text)
+
+            # Extract text from tables
+            tables_data = []
+            tables_text = []
+            for table in doc.tables:
+                table_text = []
+                for row in table.rows:
+                    row_data = [cell.text.strip() for cell in row.cells]
+                    if any(row_data):  # Skip empty rows
+                        table_text.append(row_data)
+                if table_text:
+                    tables_data.append(table_text)
+                    # Convert table to readable text format
+                    tables_text.append('\n'.join([' | '.join(row) for row in table_text]))
+
+            # Combine all text
+            combined_text = '\n'.join(full_text)
+            all_tables_text = '\n\n--- TABLE ---\n\n'.join(tables_text)
+            full_document_text = f"{combined_text}\n\n{'='*50}\nTABLES:\n{'='*50}\n\n{all_tables_text}"
+
+            print(f"[Info] Extracted {len(tables_data)} tables from Word document")
+            print(f"[Info] Sending to OpenAI for intelligent parsing...")
+
+            # Use OpenAI to intelligently parse the document
+            prompt = f"""You are a legal document analyst specializing in PCP (Personal Contract Purchase) claims reports.
+
+Analyze the following Milberg monthly report document and extract ALL claim information in a structured JSON format.
+
+DOCUMENT CONTENT:
+{full_document_text[:15000]}
+
+Your task:
+1. Identify ALL individual claims mentioned in the document (from tables or text)
+2. For EACH claim, extract the following fields (use null if not found):
+   - claim_id or claimant_id (any reference number)
+   - defendant or respondent (lender name)
+   - claim_amount or redress_calculated (monetary value in £)
+   - funded_amount or funder_share (monetary value in £)
+   - status or decision_status
+   - agreement_date
+   - product_type (e.g., PCP, HP, Conditional Sale)
+   - loan_amount
+   - commission_pct_of_cost (percentage)
+   - submission_date
+
+3. Also extract portfolio summary information:
+   - total_bundles_funded
+   - total_claimants
+   - total_claims_submitted
+   - total_funding_provided
+   - report_date
+
+Return a JSON object with this structure:
+{{
+  "report_type": "Milberg Monthly Report",
+  "report_date": "YYYY-MM-DD",
+  "portfolio_summary": {{
+    "total_bundles_funded": 0,
+    "total_claimants": 0,
+    "total_claims_submitted": 0,
+    "total_funding_provided": 0.0,
+    "total_dba_proceeds": 0.0,
+    "funder_total_share": 0.0
+  }},
+  "claims": [
+    {{
+      "claim_id": "...",
+      "claimant_id": "...",
+      "defendant": "...",
+      "claim_amount": 0.0,
+      "funded_amount": 0.0,
+      "status": "...",
+      "agreement_date": "...",
+      "product_type": "...",
+      "loan_amount": 0.0,
+      "commission_pct_of_cost": 0.0,
+      "submission_date": "...",
+      "law_firm": "Milberg"
+    }}
+  ],
+  "bundle_tracker": []
+}}
+
+IMPORTANT:
+- Extract ALL claims you can find
+- Use numeric values for amounts (not strings)
+- Use "Milberg" as the law_firm for all claims
+- Return ONLY valid JSON, no additional text"""
+
+            # Call OpenAI
+            llm_response = self.call_openai_llm(prompt, model="gpt-4o", max_tokens=4000)
+
+            # Parse JSON response
+            try:
+                # Clean response (remove markdown code blocks if present)
+                cleaned_response = llm_response.strip()
+                if cleaned_response.startswith('```'):
+                    # Remove markdown code blocks
+                    lines = cleaned_response.split('\n')
+                    cleaned_response = '\n'.join([l for l in lines if not l.startswith('```')])
+
+                extracted_data = json.loads(cleaned_response)
+
+                # Add metadata
+                extracted_data['processed_at'] = datetime.now().isoformat()
+                extracted_data['source_file'] = file_path
+                extracted_data['last_update'] = datetime.now().strftime('%Y-%m-%d')
+                extracted_data['tables_found'] = len(tables_data)
+                extracted_data['extraction_method'] = 'openai_llm'
+                extracted_data['total_claims'] = len(extracted_data.get('claims', []))
+
+                print(f"[Success] OpenAI extracted {extracted_data['total_claims']} claims")
+
+                return extracted_data
+
+            except json.JSONDecodeError as e:
+                print(f"[Warning] Could not parse OpenAI response as JSON: {e}")
+                print(f"[Debug] LLM Response: {llm_response[:500]}")
+
+                # Fallback to basic extraction
+                return self._fallback_word_extraction(combined_text, tables_data, file_path)
+
+        except Exception as e:
+            print(f"Error extracting from Word document: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {
+                'error': str(e),
+                'report_type': 'Word Document Report',
+                'source_file': file_path,
+                'processed_at': datetime.now().isoformat()
+            }
+
+    def _fallback_word_extraction(self, combined_text: str, tables_data: List, file_path: str) -> Dict[str, Any]:
+        """
+        Fallback method for Word extraction if OpenAI parsing fails
+        Handles both individual claim tables and portfolio summary tables
+        """
+        print("[Info] Using fallback extraction method")
+
+        # Initialize extracted data
+        extracted_data = {
+            'report_type': 'Milberg Monthly Report',
+            'processed_at': datetime.now().isoformat(),
+            'source_file': file_path,
+            'last_update': datetime.now().strftime('%Y-%m-%d'),
+            'tables_found': len(tables_data),
+            'extraction_method': 'fallback',
+            'claims': [],
+            'portfolio_summary': {},
+            'bundle_tracker': []
+        }
+
+        # Try to extract structured data from tables
+        claims = []
+        portfolio_stats = {}
+
+        if tables_data:
+            for table_idx, table_data in enumerate(tables_data):
+                if len(table_data) > 1:  # Has header and data rows
+                    header_row = [h.lower().strip() for h in table_data[0]]
+
+                    # Check if this is a portfolio composition table (by lender)
+                    if any('lender' in h or 'defendant' in h for h in header_row):
+                        print(f"[Info] Found lender composition table (Table {table_idx + 1})")
+                        # Extract claims by lender with financial data
+                        for row in table_data[1:]:
+                            if len(row) >= 2 and row[0].strip() and not row[0].lower().startswith('total'):
+                                lender_name = row[0].strip()
+                                try:
+                                    num_claims = int(row[1].strip()) if len(row) > 1 else 0
+
+                                    # Extract estimated claim value from column 3 (index 3)
+                                    estimated_total = 0
+                                    if len(row) > 3:
+                                        try:
+                                            value_str = row[3].strip().replace('£', '').replace('�', '').replace(',', '').strip()
+                                            estimated_total = float(value_str) if value_str else 0
+                                        except (ValueError, IndexError):
+                                            estimated_total = 0
+
+                                    # Calculate average per claim
+                                    avg_per_claim = estimated_total / num_claims if num_claims > 0 else 0
+
+                                    # Create individual claims for each lender
+                                    for i in range(num_claims):
+                                        claims.append({
+                                            'claim_id': f"{lender_name.upper().replace(' ', '_')}_{i+1}",
+                                            'claimant_id': f"{lender_name.upper().replace(' ', '_')}_{i+1}",
+                                            'defendant': lender_name,
+                                            'law_firm': 'Milberg',
+                                            'status': 'submitted',
+                                            'claim_amount': avg_per_claim,
+                                            'funded_amount': avg_per_claim * 0.7,  # Assume 70% funding rate
+                                            'source_table': f'Table {table_idx + 1} - Lender Composition'
+                                        })
+                                except (ValueError, IndexError):
+                                    continue
+
+                    # Check if this is a portfolio summary table (extract stats only, no claims)
+                    elif any('metric' in h or 'total' in h for h in header_row) and not any('lender' in h or 'defendant' in h for h in header_row):
+                        print(f"[Info] Found portfolio summary table (Table {table_idx + 1})")
+                        # Extract portfolio metrics ONLY - do not create claims
+                        for row in table_data[1:]:
+                            if len(row) >= 2:
+                                metric_name = row[0].strip().lower()
+                                if 'clients' in metric_name or 'claimants' in metric_name:
+                                    try:
+                                        # Try cumulative column first (usually index 2), then current month (index 1)
+                                        value_str = row[2].strip() if len(row) > 2 else row[1].strip()
+                                        value_str = value_str.replace(',', '').replace('£', '').replace('�', '')
+                                        portfolio_stats['total_claimants'] = int(value_str) if value_str.isdigit() else 0
+                                    except (ValueError, IndexError):
+                                        pass
+                                elif 'claims' in metric_name and 'unique' in metric_name:
+                                    try:
+                                        value_str = row[2].strip() if len(row) > 2 else row[1].strip()
+                                        value_str = value_str.replace(',', '')
+                                        portfolio_stats['total_claims_submitted'] = int(value_str) if value_str.isdigit() else 0
+                                    except (ValueError, IndexError):
+                                        pass
+
+                    # Check if this looks like individual claims table (detailed claim-by-claim data)
+                    else:
+                        claim_indicators = ['claimant id', 'claim id', 'bundle', 'redress', 'respondent']
+                        if any(indicator in ' '.join(header_row) for indicator in claim_indicators):
+                            print(f"[Info] Found individual claims table (Table {table_idx + 1})")
+                            # Process data rows for individual claims
+                            for data_row in table_data[1:]:
+                                claim = self._extract_claim_from_table_row(header_row, data_row)
+                                if claim:
+                                    claims.append(claim)
+
+        # Calculate totals
+        total_claims = len(claims)
+        total_claim_value = sum(c.get('claim_amount', 0) for c in claims)
+        total_funded = sum(c.get('funded_amount', 0) for c in claims)
+
+        extracted_data['claims'] = claims
+        extracted_data['total_claims'] = total_claims
+
+        extracted_data['portfolio_summary'] = {
+            'total_claims': total_claims,
+            'total_claimants': portfolio_stats.get('total_claimants', total_claims),
+            'total_claims_submitted': portfolio_stats.get('total_claims_submitted', total_claims),
+            'total_claim_value': total_claim_value,
+            'total_funded': total_funded,
+            'extracted_from': 'word_tables',
+            'report_type': 'Summary Report'
+        }
+
+        print(f"[Info] Extracted {total_claims} claims from Word document")
+
+        return extracted_data
+
+    def _extract_claim_from_table_row(self, headers: List[str], row_data: List[str]) -> Optional[Dict[str, Any]]:
+        """
+        Extract claim information from a table row based on headers
+        """
+        try:
+            claim = {
+                'law_firm': 'Milberg',
+                'status': 'in_progress'
+            }
+
+            # Map common column names to our fields
+            column_mappings = {
+                'claimant_id': ['claimant id', 'claimant', 'client id', 'id'],
+                'claim_id': ['claim id', 'reference', 'ref', 'claimant id'],
+                'defendant': ['defendant', 'respondent', 'lender'],
+                'claim_amount': ['claim amount', 'redress calculated', 'redress', 'amount'],
+                'funded_amount': ['funder share', 'funding', 'funded'],
+                'agreement_date': ['agreement date', 'date', 'signed date'],
+                'status': ['status', 'decision status', 'state'],
+                'product_type': ['product type', 'product', 'loan type'],
+                'loan_amount': ['loan amount', 'principal'],
+                'commission_pct_of_cost': ['commission %', 'commission', 'commission percentage'],
+            }
+
+            for field, possible_headers in column_mappings.items():
+                for idx, header in enumerate(headers):
+                    if idx < len(row_data) and any(ph in header for ph in possible_headers):
+                        value = row_data[idx].strip()
+                        if value:
+                            # Type conversion
+                            if field in ['claim_amount', 'funded_amount', 'loan_amount']:
+                                try:
+                                    # Remove currency symbols and commas
+                                    clean_val = value.replace('£', '').replace('$', '').replace(',', '').strip()
+                                    claim[field] = float(clean_val) if clean_val else 0
+                                except ValueError:
+                                    pass
+                            elif field == 'commission_pct_of_cost':
+                                try:
+                                    clean_val = value.replace('%', '').replace(',', '').strip()
+                                    pct = float(clean_val) if clean_val else 0
+                                    # Convert decimal to percentage if needed
+                                    if pct > 0 and pct < 1:
+                                        pct = pct * 100
+                                    claim[field] = pct
+                                except ValueError:
+                                    pass
+                            else:
+                                claim[field] = value
+                        break
+
+            # Set claim_id if not set but claimant_id exists
+            if 'claim_id' not in claim and 'claimant_id' in claim:
+                claim['claim_id'] = claim['claimant_id']
+
+            # Only return if we have at least a claim_id
+            if claim.get('claim_id'):
+                return claim
+
+            return None
+
+        except Exception as e:
+            print(f"Error extracting claim from table row: {str(e)}")
+            return None
+
+    def extract_from_excel_monthly_summary(self, file_path: str) -> Dict[str, Any]:
+        """
+        Extract data from new Milberg Monthly Summary Excel format
+        Single sheet with sections: Portfolio Overview, Claim Pipeline, Lender Distribution, etc.
+        """
+        try:
+            import openpyxl
+
+            wb = openpyxl.load_workbook(file_path)
+            ws = wb['Monthly Summary']
+
+            print(f"[Info] Processing new Milberg Monthly Summary format")
+
+            extracted_data = {
+                'report_type': 'Milberg Monthly Summary',
+                'processed_at': datetime.now().isoformat(),
+                'source_file': file_path,
+                'last_update': datetime.now().strftime('%Y-%m-%d'),
+                'extraction_method': 'monthly_summary_excel',
+                'claims': [],
+                'portfolio_summary': {},
+                'bundle_tracker': []
+            }
+
+            # Extract reporting period (Row 3)
+            reporting_period = ws.cell(row=3, column=3).value
+            if reporting_period and reporting_period != '[Month/Year]':
+                extracted_data['report_date'] = str(reporting_period)
+
+            # Section 2: Portfolio Overview (Rows 9-15)
+            portfolio_stats = {}
+            portfolio_stats['unique_clients'] = self._get_excel_value(ws, 10, 3)  # Cumulative column
+            portfolio_stats['unique_claims'] = self._get_excel_value(ws, 11, 3)
+            portfolio_stats['claims_submitted'] = self._get_excel_value(ws, 12, 3)
+            portfolio_stats['claims_successful'] = self._get_excel_value(ws, 13, 3)
+            portfolio_stats['claims_rejected'] = self._get_excel_value(ws, 14, 3)
+            portfolio_stats['avg_claim_value'] = self._get_excel_value(ws, 15, 3)
+
+            # Section 3: Claim Pipeline Breakdown (Rows 18-23)
+            pipeline_breakdown = {}
+            pipeline_breakdown['awaiting_dsar'] = {'count': self._get_excel_value(ws, 19, 2), 'value': self._get_excel_value(ws, 19, 3)}
+            pipeline_breakdown['pending_submission'] = {'count': self._get_excel_value(ws, 20, 2), 'value': self._get_excel_value(ws, 20, 3)}
+            pipeline_breakdown['under_review'] = {'count': self._get_excel_value(ws, 21, 2), 'value': self._get_excel_value(ws, 21, 3)}
+            pipeline_breakdown['settlement_offered'] = {'count': self._get_excel_value(ws, 22, 2), 'value': self._get_excel_value(ws, 22, 3)}
+            pipeline_breakdown['paid'] = {'count': self._get_excel_value(ws, 23, 2), 'value': self._get_excel_value(ws, 23, 3)}
+
+            # Section 4: Lender Distribution (Row 27 onwards - find the table dynamically)
+            lender_distribution = []
+            lender_start_row = 28  # Data starts after header row 27
+            for row_idx in range(lender_start_row, ws.max_row + 1):
+                lender_name = ws.cell(row=row_idx, column=1).value
+                if lender_name and str(lender_name).strip() and not str(lender_name).startswith('5.'):
+                    num_claims = self._get_excel_value(ws, row_idx, 2)
+                    pct_total = self._get_excel_value(ws, row_idx, 3)
+                    est_value = self._get_excel_value(ws, row_idx, 4)
+
+                    if num_claims and num_claims > 0:
+                        lender_distribution.append({
+                            'lender': str(lender_name).strip(),
+                            'num_claims': num_claims,
+                            'pct_total': pct_total,
+                            'estimated_value': est_value
+                        })
+                elif str(lender_name).startswith('5.'):
+                    # Hit next section
+                    break
+
+            # Section 5: Financial Utilisation (Rows 32-38)
+            financial_utilisation = {}
+            financial_utilisation['acquisition_cost'] = self._get_excel_value(ws, 33, 3)
+            financial_utilisation['submission_cost'] = self._get_excel_value(ws, 34, 3)
+            financial_utilisation['processing_cost'] = self._get_excel_value(ws, 35, 3)
+            financial_utilisation['legal_cost'] = self._get_excel_value(ws, 36, 3)
+            financial_utilisation['total_action_costs'] = self._get_excel_value(ws, 37, 3)
+            financial_utilisation['collection_account_balance'] = self._get_excel_value(ws, 38, 3)
+
+            # Section 6: Forecasting (Rows 42-44)
+            forecasting = {}
+            forecasting['expected_new_clients'] = self._get_excel_value(ws, 42, 2)
+            forecasting['expected_submissions'] = self._get_excel_value(ws, 43, 2)
+            forecasting['expected_redress'] = self._get_excel_value(ws, 44, 2)
+
+            # Generate individual claims from lender distribution
+            claims = []
+            total_claim_value = 0
+
+            for lender_info in lender_distribution:
+                lender_name = lender_info['lender']
+                num_claims = lender_info['num_claims']
+                est_total_value = lender_info.get('estimated_value', 0) or 0
+
+                # Calculate average per claim
+                avg_per_claim = est_total_value / num_claims if num_claims > 0 else 0
+
+                # Create individual claim records
+                for i in range(int(num_claims)):
+                    claim_id = f"{lender_name.upper().replace(' ', '_').replace('/', '_')}_{i+1}"
+                    claims.append({
+                        'claim_id': claim_id,
+                        'claimant_id': claim_id,
+                        'defendant': lender_name,
+                        'law_firm': 'Milberg',
+                        'status': 'in_progress',
+                        'claim_amount': avg_per_claim,
+                        'funded_amount': avg_per_claim * 0.7,  # Assume 70% funding
+                        'source': 'lender_distribution_summary'
+                    })
+                    total_claim_value += avg_per_claim
+
+            # Build final structure
+            extracted_data['claims'] = claims
+            extracted_data['total_claims'] = len(claims)
+
+            extracted_data['portfolio_summary'] = {
+                'total_claims': portfolio_stats.get('unique_claims', len(claims)),
+                'total_claimants': portfolio_stats.get('unique_clients', 0),
+                'total_claims_submitted': portfolio_stats.get('claims_submitted', 0),
+                'claims_successful': portfolio_stats.get('claims_successful', 0),
+                'claims_rejected': portfolio_stats.get('claims_rejected', 0),
+                'avg_claim_value': portfolio_stats.get('avg_claim_value', 0),
+                'total_claim_value': total_claim_value,
+                'total_funded': sum(c.get('funded_amount', 0) for c in claims),
+                'report_type': 'Monthly Summary'
+            }
+
+            extracted_data['pipeline_breakdown'] = pipeline_breakdown
+            extracted_data['lender_distribution'] = lender_distribution
+            extracted_data['financial_utilisation'] = financial_utilisation
+            extracted_data['forecasting'] = forecasting
+
+            print(f"[Info] Extracted {len(claims)} claims from {len(lender_distribution)} lenders")
+
+            return extracted_data
+
+        except Exception as e:
+            print(f"Error processing Monthly Summary Excel: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {
+                'error': str(e),
+                'report_type': 'Monthly Summary Excel',
+                'source_file': file_path,
+                'processed_at': datetime.now().isoformat()
+            }
+
+    def _get_excel_value(self, worksheet, row: int, col: int):
+        """Helper to safely get numeric value from Excel cell"""
+        try:
+            value = worksheet.cell(row=row, column=col).value
+            if value is None or value == '':
+                return 0
+            # Try to convert to number
+            if isinstance(value, (int, float)):
+                return float(value)
+            # Try to parse string
+            if isinstance(value, str):
+                # Remove currency symbols and commas
+                clean_val = value.replace('£', '').replace('$', '').replace(',', '').replace('%', '').strip()
+                if clean_val:
+                    return float(clean_val)
+            return 0
+        except (ValueError, TypeError):
+            return 0
+
     def extract_from_excel_detailed(self, file_path: str) -> Dict[str, Any]:
         """
         Extract detailed information from Excel including summary statistics
+        Routes to appropriate extraction method based on Excel structure
         """
         # Check if this is a Milberg report
         try:
             xl = pd.ExcelFile(file_path)
+
+            # Check if it's the new Monthly Summary format (single sheet)
+            if 'Monthly Summary' in xl.sheet_names and len(xl.sheet_names) == 1:
+                return self.extract_from_excel_monthly_summary(file_path)
+
+            # Otherwise, check if it's the old multi-sheet format
             is_milberg = 'Bundle Tracker' in xl.sheet_names and 'Portfolio Summary' in xl.sheet_names
         except:
             is_milberg = False
@@ -530,7 +1055,7 @@ class DocumentProcessor:
     def process_law_firm_report(self, file_path: str) -> Dict[str, Any]:
         """
         Main entry point for processing law firm reports
-        Supports TXT, XLSX, XLS files
+        Supports TXT, XLSX, XLS, DOCX files
         """
         # Determine file type
         file_extension = file_path.lower().split('.')[-1]
@@ -539,6 +1064,11 @@ class DocumentProcessor:
             # Process Excel file
             excel_data = self.extract_from_excel_detailed(file_path)
             return excel_data
+
+        elif file_extension == 'docx':
+            # Process Word document
+            word_data = self.extract_from_word(file_path)
+            return word_data
 
         else:
             # Process text file

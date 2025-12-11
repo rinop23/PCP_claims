@@ -86,6 +86,46 @@ class ComplianceCheck:
     recommendation: Optional[str] = None
 
 
+def calculate_dba_distribution(
+    net_dba_proceeds: float,
+    outstanding_costs_sum: float,
+    first_tier_funder_return: float,
+    distribution_costs_overrun: float = 0.0
+) -> dict:
+    """
+    Calculate the distribution of Net DBA Proceeds according to Priorities Deed waterfall:
+    1. Pay Outstanding Costs Sum to Funder
+    2. Pay First Tier Funder Return to Funder
+    3. Pay Distribution Costs Overrun to Firm
+    4. Split remaining Net Proceeds: 80% Funder, 20% Firm (half of Firm's share to Claims Processor)
+    Returns a dict with breakdown.
+    """
+    # Step 1: Pay Outstanding Costs Sum
+    step1 = min(net_dba_proceeds, outstanding_costs_sum)
+    remaining = net_dba_proceeds - step1
+    # Step 2: Pay First Tier Funder Return
+    step2 = min(remaining, first_tier_funder_return)
+    remaining -= step2
+    # Step 3: Pay Distribution Costs Overrun
+    step3 = min(remaining, distribution_costs_overrun)
+    remaining -= step3
+    # Step 4: Split remaining Net Proceeds
+    net_proceeds = max(remaining, 0)
+    funder_share = step1 + step2 + (net_proceeds * 0.8)
+    firm_share = step3 + (net_proceeds * 0.2)
+    claims_processor_share = firm_share * 0.5
+    firm_final_share = firm_share - claims_processor_share
+    return {
+        "funder_share": funder_share,
+        "firm_share": firm_final_share,
+        "claims_processor_share": claims_processor_share,
+        "outstanding_costs_sum": step1,
+        "first_tier_funder_return": step2,
+        "distribution_costs_overrun": step3,
+        "net_proceeds": net_proceeds
+    }
+
+
 class PCPFundingAgent:
     """Main agent for managing PCP claim funding"""
     
@@ -172,9 +212,10 @@ class PCPFundingAgent:
         print(f"✓ Claim report ingested: {claim.claim_id} - {claim.claimant_name}")
         return claim
 
-    def ingest_excel_report(self, file_path: str) -> Dict[str, Any]:
+    def ingest_report(self, file_path: str) -> Dict[str, Any]:
         """
-        Process and ingest Excel report (e.g., Milberg monthly report)
+        Process and ingest report from law firm (Excel or Word format)
+        Supports .xlsx, .xls, and .docx files (e.g., Milberg monthly report)
         Uses FCA redress knowledge for eligibility/compliance and DOCS for profit analysis.
         """
         from document_processor import DocumentProcessor
@@ -286,6 +327,24 @@ class PCPFundingAgent:
                             print(f"Warning: Could not ingest claim: {str(e)}")
                             skipped_count += 1
 
+        # Calculate DBA proceeds split using Priorities Deed waterfall
+        # Extract required values from portfolio_summary
+        ps = extracted_data.get('portfolio_summary', {})
+        net_dba_proceeds = ps.get('total_dba_proceeds', 0)
+        outstanding_costs_sum = ps.get('outstanding_costs_sum', 0)
+        first_tier_funder_return = ps.get('first_tier_funder_return', 0)
+        distribution_costs_overrun = ps.get('distribution_costs_overrun', 0)
+        dba_split = calculate_dba_distribution(
+            net_dba_proceeds,
+            outstanding_costs_sum,
+            first_tier_funder_return,
+            distribution_costs_overrun
+        )
+        ps['funder_total_share'] = dba_split['funder_share']
+        ps['milberg_total_share'] = dba_split['firm_share']
+        ps['claims_processor_share'] = dba_split['claims_processor_share']
+        ps['dba_distribution_details'] = dba_split
+
         summary = {
             'file_path': file_path,
             'report_type': extracted_data.get('report_type', 'Unknown'),
@@ -298,9 +357,37 @@ class PCPFundingAgent:
             'claim_profits': claim_profits
         }
 
-        print(f"✓ Excel report processed: {ingested_count} claims ingested, {skipped_count} skipped")
+        file_type = file_path.lower().split('.')[-1]
+        print(f"✓ {file_type.upper()} report processed: {ingested_count} claims ingested, {skipped_count} skipped")
+
+        # Generate comprehensive analysis report for all document types
+        if file_type in ['docx', 'xlsx', 'xls']:
+            try:
+                from comprehensive_report_generator import ComprehensiveReportGenerator
+                generator = ComprehensiveReportGenerator()
+
+                # Create output filename
+                base_name = os.path.splitext(os.path.basename(file_path))[0]
+                output_path = os.path.join(os.path.dirname(file_path), f"{base_name}_COMPREHENSIVE_ANALYSIS.docx")
+
+                print(f"[Info] Generating comprehensive analysis report...")
+                generator.generate_full_report(summary, output_path)
+                summary['comprehensive_report_path'] = output_path
+                print(f"✓ Comprehensive report generated: {output_path}")
+
+            except Exception as e:
+                print(f"[Warning] Could not generate comprehensive report: {e}")
+                import traceback
+                traceback.print_exc()
 
         return summary
+
+    def ingest_excel_report(self, file_path: str) -> Dict[str, Any]:
+        """
+        Process and ingest Excel report (backwards compatibility alias)
+        Use ingest_report() instead - supports both Excel and Word formats.
+        """
+        return self.ingest_report(file_path)
     
     def check_lfa_compliance(self, claim_id: str) -> List[ComplianceCheck]:
         """
