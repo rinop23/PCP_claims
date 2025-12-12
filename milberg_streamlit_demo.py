@@ -11,6 +11,13 @@ from plotly.subplots import make_subplots
 import os
 import hashlib
 from data_extractor import extract_monthly_report_data, read_priority_deed_rules, calculate_financial_projections
+from datetime import datetime
+
+# NEW: OpenAI agent-based investor report generation
+try:
+    from intelligent_agents import generate_full_investor_report
+except Exception:
+    generate_full_investor_report = None
 
 # Page config
 st.set_page_config(
@@ -68,6 +75,13 @@ if 'data' not in st.session_state:
     st.session_state.data = None
 if 'debug_output' not in st.session_state:
     st.session_state.debug_output = None
+# NEW: investor report state
+if 'investor_report_md' not in st.session_state:
+    st.session_state.investor_report_md = None
+if 'investor_report_path' not in st.session_state:
+    st.session_state.investor_report_path = None
+if 'last_uploaded_excel_path' not in st.session_state:
+    st.session_state.last_uploaded_excel_path = None
 
 # Login page
 if not st.session_state.logged_in:
@@ -96,6 +110,9 @@ else:
         temp_path = os.path.join("uploads", uploaded_file.name)
         with open(temp_path, "wb") as f:
             f.write(uploaded_file.getbuffer())
+
+        # Track latest upload path for report generation
+        st.session_state.last_uploaded_excel_path = temp_path
 
         if st.button("📊 Load Data", type="primary"):
             with st.spinner("Loading data from Excel..."):
@@ -165,6 +182,74 @@ else:
         # Get Priority Deed rules and calculate financials
         priority_deed = read_priority_deed_rules()
         financials = calculate_financial_projections(totals, costs, priority_deed)
+
+        st.markdown("---")
+
+        # NEW: Monthly Investor Report (OpenAI Agent)
+        st.subheader("📄 Monthly Investor Report")
+
+        col_r1, col_r2, col_r3 = st.columns([1, 1, 2])
+
+        with col_r1:
+            generate_clicked = st.button("🧠 Generate Investor Report", type="primary")
+
+        with col_r2:
+            if st.session_state.investor_report_md:
+                st.download_button(
+                    label="⬇️ Download Report (Markdown)",
+                    data=st.session_state.investor_report_md.encode("utf-8"),
+                    file_name=os.path.basename(st.session_state.investor_report_path or "monthly_investor_report.md"),
+                    mime="text/markdown",
+                    use_container_width=True,
+                )
+            else:
+                st.caption("Generate the report to enable download")
+
+        with col_r3:
+            st.caption(
+                "Uses the bundled OpenAI multi-agent system (`intelligent_agents.generate_full_investor_report`). "
+                "Requires `OPENAI_API_KEY` env var or Streamlit secret."
+            )
+
+        if generate_clicked:
+            if generate_full_investor_report is None:
+                st.error("Investor report agent system is not available (failed to import `intelligent_agents`).")
+            elif not st.session_state.last_uploaded_excel_path or not os.path.exists(st.session_state.last_uploaded_excel_path):
+                st.error("No uploaded Excel detected. Please upload and load a Monthly Report first.")
+            else:
+                try:
+                    with st.spinner("Generating investor report with OpenAI agents..."):
+                        result = generate_full_investor_report(st.session_state.last_uploaded_excel_path)
+                        md = result.get("markdown_report")
+                        if not md:
+                            raise ValueError("Agent did not return markdown_report")
+
+                        # Persist in session
+                        st.session_state.investor_report_md = md
+
+                        # Write to disk for retention
+                        os.makedirs("reports", exist_ok=True)
+                        period = (
+                            (result.get("monthly_data") or {}).get("reporting_period")
+                            or datetime.now().strftime("%Y-%m")
+                        )
+                        safe_period = str(period).replace("/", "-").replace("\\", "-").replace(":", "-")
+                        out_path = os.path.join("reports", f"Investor_Report_{safe_period}.md")
+                        with open(out_path, "w", encoding="utf-8") as f:
+                            f.write(md)
+                        st.session_state.investor_report_path = out_path
+
+                    st.success("Investor report generated.")
+
+                    with st.expander("Preview report"):
+                        st.markdown(st.session_state.investor_report_md)
+
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to generate investor report: {e}")
+                    st.info(
+                        "If this is an API key issue, set `OPENAI_API_KEY` as an environment variable or in Streamlit secrets."
+                    )
 
         st.markdown("---")
 
