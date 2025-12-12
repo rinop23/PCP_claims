@@ -210,10 +210,19 @@ else:
                 st.caption("Generate the report to enable download")
 
         with col_r3:
+            import sys
             st.caption(
                 "Uses the bundled OpenAI multi-agent system (`intelligent_agents.generate_full_investor_report`). "
                 "Requires `OPENAI_API_KEY` env var or Streamlit secret."
             )
+            with st.expander("Report generation environment"):
+                st.code(f"python: {sys.executable}\nplatform: {sys.platform}")
+                try:
+                    import kaleido  # noqa: F401
+                    import kaleido as _k
+                    st.success(f"kaleido available: {getattr(_k, '__version__', 'unknown')}")
+                except Exception as e:
+                    st.error(f"kaleido NOT available: {e}")
 
         if generate_clicked:
             if generate_full_investor_report is None:
@@ -671,7 +680,7 @@ else:
             st.subheader("Pipeline Breakdown Data")
 
             pipeline_display = pipeline_data.copy()
-            pipeline_display['Value'] = pipeline_display['Value'].apply(lambda x: f"£{x:,.2f}")
+            pipeline_display['Value'] = pipeline_display['Value'].apply(lambda x: f"£{x:.2f}")
 
             st.dataframe(pipeline_display, use_container_width=True, hide_index=True)
 
