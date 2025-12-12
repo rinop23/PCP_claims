@@ -726,10 +726,33 @@ def _build_dashboard_figures(monthly_data: Dict[str, Any], report_data: Dict[str
 
     figs = {}
 
-    # Lender Top 10 by claims
+    # Shared styling for static export readability
+    def _style(fig, *, height: int = 520):
+        try:
+            fig.update_layout(
+                template="plotly_white",
+                height=height,
+                margin=dict(l=40, r=20, t=60, b=40),
+                paper_bgcolor="white",
+                plot_bgcolor="white",
+                font=dict(size=14, color="#111"),
+                title=dict(x=0.02, xanchor="left"),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+            )
+            fig.update_xaxes(showgrid=True, gridcolor="#e6e6e6", zeroline=False)
+            fig.update_yaxes(showgrid=True, gridcolor="#e6e6e6", zeroline=False)
+        except Exception:
+            pass
+        return fig
+
+    money_fmt = "£,.0f"
+
+    # ==================== LENDERS (Dashboard Tab) ====================
     lenders = (monthly_data or {}).get("lender_distribution") or []
     if lenders:
         df_l = pd.DataFrame(lenders).sort_values("num_claims", ascending=False)
+
+        # Top 10 lenders pie by claims
         top10 = df_l.head(10)
         others_claims = df_l.iloc[10:]["num_claims"].sum() if len(df_l) > 10 else 0
         if others_claims > 0:
@@ -739,12 +762,18 @@ def _build_dashboard_figures(monthly_data: Dict[str, Any], report_data: Dict[str
         else:
             pie_df = top10[["lender", "num_claims"]]
 
-        fig_pie = px.pie(pie_df, values="num_claims", names="lender", hole=0.4)
+        fig_pie = px.pie(
+            pie_df,
+            values="num_claims",
+            names="lender",
+            hole=0.4,
+            color_discrete_sequence=px.colors.qualitative.Set2,
+        )
         fig_pie.update_traces(textposition="inside", textinfo="percent+label")
         fig_pie.update_layout(title="Top 10 Lenders by Claims")
-        figs["lenders_pie"] = fig_pie
+        figs["lenders_pie"] = _style(fig_pie, height=520)
 
-        # Top 15 lenders by value (bar)
+        # Top 15 lenders by value (horizontal bar)
         if "estimated_value" in df_l.columns:
             top15_val = df_l.head(15).sort_values("estimated_value")
             fig_bar = px.bar(
@@ -753,11 +782,70 @@ def _build_dashboard_figures(monthly_data: Dict[str, Any], report_data: Dict[str
                 y="lender",
                 orientation="h",
                 color="num_claims" if "num_claims" in top15_val.columns else None,
+                color_continuous_scale="Blues",
+                text=top15_val["estimated_value"].map(lambda v: f"£{v:,.0f}"),
                 title="Top 15 Lenders by Portfolio Value",
             )
-            figs["lenders_value_bar"] = fig_bar
+            fig_bar.update_traces(textposition="outside")
+            fig_bar.update_layout(showlegend=False)
+            fig_bar.update_xaxes(tickformat=money_fmt)
+            figs["lenders_value_bar"] = _style(fig_bar, height=650)
 
-    # Pipeline funnel by count
+    # ==================== ECONOMIC ANALYSIS (Dashboard Tab) ====================
+    # Use investor_report financials for simple, readable static charts
+    fin = (report_data or {}).get("financial_analysis") or {}
+    try:
+        total_settlements = fin.get("total_settlements")
+        dba_proceeds = fin.get("dba_proceeds_expected")
+        total_costs = fin.get("total_costs_incurred")
+        net_proceeds = fin.get("net_proceeds_after_costs")
+
+        if any(v is not None for v in [total_settlements, dba_proceeds, total_costs, net_proceeds]):
+            rows = [
+                {"Step": "Total Expected Settlements", "Value": float(total_settlements or 0)},
+                {"Step": "DBA Proceeds Expected", "Value": float(dba_proceeds or 0)},
+                {"Step": "Total Costs Incurred", "Value": float(total_costs or 0)},
+                {"Step": "Net Proceeds After Costs", "Value": float(net_proceeds or 0)},
+            ]
+            df_fin = pd.DataFrame(rows)
+            fig_fin = px.bar(
+                df_fin,
+                x="Step",
+                y="Value",
+                text=df_fin["Value"].map(lambda v: f"£{v:,.0f}"),
+                color="Step",
+                color_discrete_sequence=px.colors.qualitative.Set2,
+                title="Economic Summary (Expected)",
+            )
+            fig_fin.update_traces(textposition="outside")
+            fig_fin.update_yaxes(tickformat=money_fmt)
+            fig_fin.update_layout(showlegend=False, xaxis_title="", yaxis_title="Value")
+            figs["economic_summary"] = _style(fig_fin, height=520)
+
+            # Profit split (funder vs firm) if provided
+            funder_ret = fin.get("funder_expected_return")
+            firm_ret = fin.get("firm_expected_return")
+            if funder_ret is not None or firm_ret is not None:
+                df_split = pd.DataFrame(
+                    [
+                        {"Recipient": "Funder", "Value": float(funder_ret or 0)},
+                        {"Recipient": "Law Firm", "Value": float(firm_ret or 0)},
+                    ]
+                )
+                fig_split = px.pie(
+                    df_split,
+                    names="Recipient",
+                    values="Value",
+                    hole=0.45,
+                    color_discrete_sequence=["#3498db", "#2ecc71"],
+                )
+                fig_split.update_traces(textposition="inside", textinfo="percent+label")
+                fig_split.update_layout(title="Expected Profit Distribution")
+                figs["profit_split"] = _style(fig_split, height=520)
+    except Exception:
+        pass
+
+    # ==================== COMPLIANCE & PIPELINE (Dashboard Tab) ====================
     pipeline = (monthly_data or {}).get("pipeline") or {}
     stage_order = [
         ("Awaiting DSAR", "awaiting_dsar"),
@@ -772,12 +860,31 @@ def _build_dashboard_figures(monthly_data: Dict[str, Any], report_data: Dict[str
             d = pipeline.get(key) or {}
             pipe_rows.append({"Stage": label, "Count": d.get("count", 0), "Value": d.get("value", 0)})
         df_p = pd.DataFrame(pipe_rows)
-        fig_funnel = go.Figure(go.Funnel(y=df_p["Stage"], x=df_p["Count"], textinfo="value+percent initial"))
-        fig_funnel.update_layout(title="Pipeline Funnel (by Count)")
-        figs["pipeline_funnel"] = fig_funnel
 
-        fig_pipe_val = px.bar(df_p, x="Stage", y="Value", title="Pipeline Value by Stage")
-        figs["pipeline_value"] = fig_pipe_val
+        fig_funnel = go.Figure(
+            go.Funnel(
+                y=df_p["Stage"],
+                x=df_p["Count"],
+                textinfo="value+percent initial",
+                marker={"color": ["#3498db", "#2ecc71", "#f39c12", "#9b59b6", "#1abc9c"]},
+            )
+        )
+        fig_funnel.update_layout(title="Pipeline Funnel (by Count)")
+        figs["pipeline_funnel"] = _style(fig_funnel, height=520)
+
+        fig_pipe_val = px.bar(
+            df_p,
+            x="Stage",
+            y="Value",
+            text=df_p["Value"].map(lambda v: f"£{v:,.0f}"),
+            color="Stage",
+            color_discrete_sequence=px.colors.qualitative.Set2,
+            title="Pipeline Value by Stage",
+        )
+        fig_pipe_val.update_traces(textposition="outside")
+        fig_pipe_val.update_yaxes(tickformat=money_fmt)
+        fig_pipe_val.update_layout(showlegend=False, xaxis_title="", yaxis_title="Value")
+        figs["pipeline_value"] = _style(fig_pipe_val, height=520)
     except Exception:
         pass
 
@@ -877,44 +984,74 @@ def build_investor_report_docx(
         doc.add_paragraph(str(period))
 
     if narrative:
+        doc.add_heading("Executive Summary", level=1)
         doc.add_paragraph(narrative)
 
-    # Add a compact metrics section (so the DOCX is useful even without charts)
+    # ==================== Mirror the dashboard sections ====================
     perf = (investor_report or {}).get("portfolio_performance") or {}
     fin = (investor_report or {}).get("financial_analysis") or {}
+    comp = (investor_report or {}).get("compliance_assessment") or {}
+    risk = (investor_report or {}).get("risk_assessment") or {}
+
+    # High-level metrics (kept near the top)
     _add_kv_table(
         "Key Metrics",
         [
             ("Total Claims", perf.get("total_claims", "N/A")),
             ("Total Clients", perf.get("total_clients", "N/A")),
             ("Total Portfolio Value", perf.get("total_portfolio_value", "N/A")),
+            ("Success Rate", perf.get("success_rate", "N/A")),
             ("Total Expected Settlements", fin.get("total_settlements", "N/A")),
             ("DBA Proceeds Expected", fin.get("dba_proceeds_expected", "N/A")),
             ("Total Costs Incurred", fin.get("total_costs_incurred", "N/A")),
+            ("Net Proceeds After Costs", fin.get("net_proceeds_after_costs", "N/A")),
             ("Funder Expected Return", fin.get("funder_expected_return", "N/A")),
             ("Firm Expected Return", fin.get("firm_expected_return", "N/A")),
+            ("ROI Projection", fin.get("roi_projection", "N/A")),
+            ("MOIC Projection", fin.get("moic_projection", "N/A")),
         ],
     )
 
-    doc.add_heading("Key Charts", level=1)
-
-    # Record environment diagnostic info inside the DOCX to make failures actionable
-    doc.add_paragraph(f"Chart export environment: {_kaleido_debug_info()}")
-
+    # Charts: group under the same conceptual headings as dashboard
     figs = _build_dashboard_figures(monthly_data, investor_report)
+
+    doc.add_heading("Lenders", level=1)
+    doc.add_paragraph("Key lender distribution charts (as shown on the dashboard).")
+
+    doc.add_heading("Economic Analysis", level=1)
+    doc.add_paragraph("Summary of expected economics and distribution.")
+
+    doc.add_heading("Compliance & Pipeline", level=1)
+    doc.add_paragraph(f"FCA compliance status: {(comp.get('fca_compliance_status') or 'N/A').upper()}")
+
+    # Optional: brief risk section to mirror dashboard narrative
+    doc.add_heading("Portfolio Analysis", level=1)
+    if risk.get("risk_level"):
+        doc.add_paragraph(f"Overall risk level: {risk.get('risk_level')}")
+
+    # Record environment diagnostic info inside the DOCX (keep this for support)
+    doc.add_heading("Charts", level=1)
+    doc.add_paragraph(f"Chart export environment: {_kaleido_debug_info()}")
 
     # Write images to temp files (python-docx needs file paths)
     tmp_dir = os.path.join(os.path.dirname(out_path), ".tmp_report_assets")
     os.makedirs(tmp_dir, exist_ok=True)
 
+    # Helper to add a chart if present
+    def _add_chart(key: str, caption: str):
+        nonlocal_export_failures = None  # placeholder for linting
+
     added_any = False
     export_failures: List[str] = []
 
-    for key, fig in figs.items():
+    def _add_chart(key: str, caption: str):
+        nonlocal added_any
+        fig = figs.get(key)
+        if fig is None:
+            return
         try:
             png, err = _export_plotly_fig_to_png_bytes_with_error(fig)
             if not png:
-                # Provide the real root cause
                 if err is not None:
                     raise err
                 raise RuntimeError("Empty PNG bytes returned by plotly.io.to_image")
@@ -923,24 +1060,45 @@ def build_investor_report_docx(
             with open(img_path, "wb") as f:
                 f.write(png)
 
-            doc.add_paragraph(key.replace("_", " ").title())
+            doc.add_paragraph(caption)
             doc.add_picture(img_path, width=Inches(6.5))
             added_any = True
         except Exception as e:
             export_failures.append(f"{key}: {type(e).__name__}: {e}")
 
+    # Lenders
+    _add_chart("lenders_pie", "Top 10 Lenders by Claims")
+    _add_chart("lenders_value_bar", "Top 15 Lenders by Portfolio Value")
+
+    # Economic
+    _add_chart("economic_summary", "Economic Summary (Expected)")
+    _add_chart("profit_split", "Expected Profit Distribution")
+
+    # Pipeline
+    _add_chart("pipeline_funnel", "Pipeline Funnel (by Count)")
+    _add_chart("pipeline_value", "Pipeline Value by Stage")
+
     if not added_any:
         doc.add_paragraph(
             "Charts could not be embedded. This usually means Plotly image export failed in this environment. "
-            "Ensure 'kaleido' is installed and available to the same Python environment running Streamlit."
+            "Ensure 'kaleido' is installed and a Chrome/Chromium binary is available."
         )
         if export_failures:
-            # Put the real reasons inside the DOCX for debugging
             doc.add_paragraph("Export errors:")
             for err in export_failures[:10]:
                 doc.add_paragraph(f"- {err}")
 
-    # Also include the action items (brief)
+    # Compliance details (text)
+    if comp:
+        doc.add_heading("Compliance Notes", level=2)
+        if comp.get("commission_analysis"):
+            doc.add_paragraph(str(comp.get("commission_analysis")))
+        if comp.get("compliance_actions_needed"):
+            doc.add_paragraph("Actions required:")
+            for a in (comp.get("compliance_actions_needed") or []):
+                doc.add_paragraph(f"- {a}")
+
+    # Action items
     doc.add_heading("Action Items", level=1)
     for item in ((investor_report or {}).get("action_items") or []):
         item = item or {}
