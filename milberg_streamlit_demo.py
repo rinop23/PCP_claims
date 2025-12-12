@@ -1,6 +1,6 @@
 """
-Enhanced PCP Claims Analysis Dashboard
-Multi-Agent AI System with Intelligent Visualizations
+Milberg PCP Claims Dashboard - Data Visualization Focused
+Shows ACTUAL numbers and graphs, not AI summaries
 """
 
 import streamlit as st
@@ -10,22 +10,17 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import os
 import hashlib
-from intelligent_agents import generate_full_investor_report
-import json
-from docx import Document
-from docx.shared import Inches
-from io import BytesIO
-import base64
+from data_extractor import extract_monthly_report_data, read_priority_deed_rules, calculate_financial_projections
 
 # Page config
 st.set_page_config(
-    page_title="PCP Claims Investor Dashboard",
+    page_title="Milberg PCP Claims Dashboard",
     page_icon="📊",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
-# Custom CSS for better styling
+# Custom CSS
 st.markdown("""
 <style>
     .main-header {
@@ -34,21 +29,20 @@ st.markdown("""
         color: #1f77b4;
         margin-bottom: 0.5rem;
     }
-    .sub-header {
-        font-size: 1.2rem;
-        color: #666;
-        margin-bottom: 2rem;
-    }
     .metric-card {
-        background-color: #f0f2f6;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        border-left: 4px solid #1f77b4;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 1.5rem;
+        border-radius: 10px;
+        color: white;
+        text-align: center;
     }
-    .agent-status {
-        padding: 0.5rem;
-        border-radius: 0.3rem;
-        margin: 0.5rem 0;
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 2px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        padding-left: 20px;
+        padding-right: 20px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -65,693 +59,615 @@ USERS = {
 }
 
 def check_login(username: str, password: str) -> bool:
-    if username in USERS:
-        return USERS[username] == hash_password(password)
-    return False
+    return username in USERS and USERS[username] == hash_password(password)
 
-# Initialize session state
+# Session state
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
-if 'username' not in st.session_state:
-    st.session_state.username = None
-if 'analysis_result' not in st.session_state:
-    st.session_state.analysis_result = None
-
-# Helper functions for visualizations
-def create_portfolio_overview_chart(portfolio_metrics):
-    """Create portfolio overview metrics chart"""
-    fig = go.Figure()
-
-    categories = ['Submitted', 'Successful', 'Rejected', 'Pending']
-    values = [
-        portfolio_metrics.get('claims_submitted', 0),
-        portfolio_metrics.get('claims_successful', 0),
-        portfolio_metrics.get('claims_rejected', 0),
-        portfolio_metrics.get('claims_pending', 0)
-    ]
-
-    fig.add_trace(go.Bar(
-        x=categories,
-        y=values,
-        text=values,
-        textposition='auto',
-        marker_color=['#3498db', '#2ecc71', '#e74c3c', '#f39c12']
-    ))
-
-    fig.update_layout(
-        title="Claims by Status",
-        xaxis_title="Status",
-        yaxis_title="Number of Claims",
-        height=400,
-        showlegend=False
-    )
-
-    return fig
-
-def create_lender_distribution_chart(lender_data):
-    """Create lender distribution pie chart for top 10"""
-    df = pd.DataFrame(lender_data[:10])
-
-    fig = px.pie(
-        df,
-        values='num_claims',
-        names='lender',
-        title='Top 10 Lenders by Claim Volume',
-        hole=0.4
-    )
-
-    fig.update_traces(textposition='inside', textinfo='percent+label')
-    fig.update_layout(height=500)
-
-    return fig
-
-def create_pipeline_funnel(pipeline_data):
-    """Create pipeline funnel chart"""
-    stages = ['Awaiting DSAR', 'Pending Submission', 'Under Review', 'Settlement Offered', 'Paid']
-    counts = [
-        pipeline_data.get('awaiting_dsar', {}).get('count', 0),
-        pipeline_data.get('pending_submission', {}).get('count', 0),
-        pipeline_data.get('under_review', {}).get('count', 0),
-        pipeline_data.get('settlement_offered', {}).get('count', 0),
-        pipeline_data.get('paid', {}).get('count', 0)
-    ]
-
-    fig = go.Figure(go.Funnel(
-        y=stages,
-        x=counts,
-        textinfo="value+percent initial",
-        marker={"color": ["#3498db", "#2ecc71", "#f39c12", "#9b59b6", "#1abc9c"]}
-    ))
-
-    fig.update_layout(
-        title="Claims Pipeline Funnel",
-        height=500
-    )
-
-    return fig
-
-def create_financial_waterfall(financial_data):
-    """Create waterfall chart for financial breakdown"""
-
-    total_settlement = financial_data.get('total_settlements', 0)
-    dba_proceeds = financial_data.get('dba_proceeds_expected', 0)
-    costs = financial_data.get('total_costs_incurred', 0)
-    net_proceeds = financial_data.get('net_proceeds_after_costs', 0)
-
-    fig = go.Figure(go.Waterfall(
-        name="Financial Flow",
-        orientation="v",
-        measure=["absolute", "relative", "relative", "total"],
-        x=["Total Settlement", "DBA Fee (30%)", "Less: Costs", "Net Proceeds"],
-        y=[total_settlement, dba_proceeds - total_settlement, -costs, net_proceeds],
-        text=[f"£{total_settlement:,.0f}", f"£{dba_proceeds:,.0f}", f"-£{costs:,.0f}", f"£{net_proceeds:,.0f}"],
-        textposition="outside",
-        connector={"line": {"color": "rgb(63, 63, 63)"}},
-    ))
-
-    fig.update_layout(
-        title="Financial Waterfall: Settlement to Net Proceeds",
-        height=500,
-        showlegend=False
-    )
-
-    return fig
-
-def create_profit_split_chart(financial_data, profit_rules):
-    """Create profit split pie chart"""
-
-    funder_return = financial_data.get('funder_expected_return', 0)
-    firm_return = financial_data.get('firm_expected_return', 0)
-
-    funder_pct = profit_rules.get('profit_split', {}).get('funder_percentage', 80)
-    firm_pct = profit_rules.get('profit_split', {}).get('law_firm_percentage', 20)
-
-    fig = go.Figure(data=[go.Pie(
-        labels=[f'Funder ({funder_pct}%)', f'Law Firm ({firm_pct}%)'],
-        values=[funder_return, firm_return],
-        hole=0.3,
-        marker_colors=['#3498db', '#2ecc71']
-    )])
-
-    fig.update_traces(textposition='inside', textinfo='percent+label+value')
-    fig.update_layout(
-        title="Profit Distribution (After Costs)",
-        height=400,
-        annotations=[dict(text='Net Proceeds<br>Split', x=0.5, y=0.5, font_size=12, showarrow=False)]
-    )
-
-    return fig
-
-def create_cost_breakdown_chart(financial_metrics):
-    """Create cost breakdown chart"""
-
-    costs = {
-        'Acquisition': financial_metrics.get('acquisition_cost', 0),
-        'Submission': financial_metrics.get('submission_cost', 0),
-        'Processing': financial_metrics.get('processing_cost', 0),
-        'Legal': financial_metrics.get('legal_cost', 0)
-    }
-
-    fig = px.bar(
-        x=list(costs.keys()),
-        y=list(costs.values()),
-        title="Cost Breakdown by Category",
-        labels={'x': 'Cost Category', 'y': 'Amount (£)'},
-        text=[f"£{v:,.0f}" for v in costs.values()]
-    )
-
-    fig.update_traces(textposition='outside', marker_color='#e74c3c')
-    fig.update_layout(height=400)
-
-    return fig
-
-def create_lender_value_chart(lender_data):
-    """Create lender value horizontal bar chart"""
-    df = pd.DataFrame(lender_data[:15])
-    df = df.sort_values('estimated_value', ascending=True)
-
-    fig = px.bar(
-        df,
-        x='estimated_value',
-        y='lender',
-        orientation='h',
-        title='Top 15 Lenders by Portfolio Value',
-        labels={'estimated_value': 'Portfolio Value (£)', 'lender': 'Lender'},
-        text=[f"£{v:,.0f}" for v in df['estimated_value']]
-    )
-
-    fig.update_traces(textposition='outside', marker_color='#9b59b6')
-    fig.update_layout(height=600, yaxis={'categoryorder':'total ascending'})
-
-    return fig
-
-def generate_word_report(report_markdown, monthly_data, investor_report):
-    """Generate Word document report"""
-    doc = Document()
-
-    # Title
-    title = doc.add_heading('Monthly Investor Report', 0)
-    title.alignment = 1  # Center
-
-    doc.add_heading(f"Reporting Period: {monthly_data.get('reporting_period', 'N/A')}", level=2)
-    doc.add_paragraph()
-
-    # Executive Summary
-    doc.add_heading('Executive Summary', level=1)
-    exec_summary = investor_report.get('executive_summary', {})
-    doc.add_paragraph(f"Portfolio Health Score: {exec_summary.get('portfolio_health_score', 0)}/100")
-    doc.add_paragraph()
-
-    # Key metrics
-    doc.add_heading('Key Metrics', level=2)
-    for metric in exec_summary.get('key_metrics_summary', []):
-        doc.add_paragraph(metric, style='List Bullet')
-
-    doc.add_page_break()
-
-    # Portfolio Performance
-    doc.add_heading('Portfolio Performance', level=1)
-    perf = investor_report.get('portfolio_performance', {})
-
-    table = doc.add_table(rows=6, cols=2)
-    table.style = 'Light Grid Accent 1'
-
-    metrics = [
-        ('Total Claims', f"{perf.get('total_claims', 0):,}"),
-        ('Total Clients', f"{perf.get('total_clients', 0):,}"),
-        ('Success Rate', f"{perf.get('success_rate', 0):.1f}%"),
-        ('Average Settlement', f"£{perf.get('average_settlement', 0):,.2f}"),
-        ('Portfolio Value', f"£{perf.get('total_portfolio_value', 0):,.2f}")
-    ]
-
-    for i, (label, value) in enumerate(metrics):
-        table.rows[i].cells[0].text = label
-        table.rows[i].cells[1].text = value
-
-    doc.add_page_break()
-
-    # Financial Analysis
-    doc.add_heading('Financial Analysis', level=1)
-    fin = investor_report.get('financial_analysis', {})
-
-    doc.add_heading('Revenue', level=2)
-    doc.add_paragraph(f"Total Expected Settlements: £{fin.get('total_settlements', 0):,.2f}")
-    doc.add_paragraph(f"DBA Proceeds (30%): £{fin.get('dba_proceeds_expected', 0):,.2f}")
-
-    doc.add_heading('Profit Distribution', level=2)
-    doc.add_paragraph(f"Funder Expected Return: £{fin.get('funder_expected_return', 0):,.2f}")
-    doc.add_paragraph(f"Firm Expected Return: £{fin.get('firm_expected_return', 0):,.2f}")
-
-    doc.add_heading('Performance Metrics', level=2)
-    doc.add_paragraph(f"ROI Projection: {fin.get('roi_projection', 0):.1f}%")
-    doc.add_paragraph(f"MOIC Projection: {fin.get('moic_projection', 0):.2f}x")
-
-    # Save to BytesIO
-    buffer = BytesIO()
-    doc.save(buffer)
-    buffer.seek(0)
-
-    return buffer
+if 'data' not in st.session_state:
+    st.session_state.data = None
 
 # Login page
 if not st.session_state.logged_in:
-    st.markdown('<div class="main-header">🔐 PCP Claims Investor Dashboard</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-header">AI-Powered Multi-Agent Analysis System</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-header">🔐 Milberg PCP Claims Dashboard</div>', unsafe_allow_html=True)
 
     col1, col2, col3 = st.columns([1, 2, 1])
-
     with col2:
         with st.form("login_form"):
-            st.subheader("Login")
             username = st.text_input("Username")
             password = st.text_input("Password", type="password")
-            submit = st.form_submit_button("Login", use_container_width=True)
-
-            if submit:
+            if st.form_submit_button("Login", use_container_width=True):
                 if check_login(username, password):
                     st.session_state.logged_in = True
-                    st.session_state.username = username
                     st.rerun()
                 else:
-                    st.error("Invalid username or password")
-
-# Main dashboard
+                    st.error("Invalid credentials")
 else:
-    # Sidebar
-    with st.sidebar:
-        st.markdown("### 🤖 AI Agent System")
-        st.markdown(f"**User:** {st.session_state.username}")
-
-        if st.button("🚪 Logout", use_container_width=True):
-            st.session_state.logged_in = False
-            st.session_state.username = None
-            st.session_state.analysis_result = None
-            st.rerun()
-
-        st.markdown("---")
-
-        st.markdown("### 📄 Active Agents")
-        st.markdown("""
-        1. 📄 **Priority Deed Agent**
-           Reads profit distribution rules
-
-        2. ⚖️ **FCA Compliance Agent**
-           Validates claim compliance
-
-        3. 📊 **Monthly Report Agent**
-           Extracts Excel data
-
-        4. 📝 **Investor Report Agent**
-           Generates final report
-        """)
-
-        st.markdown("---")
-        st.markdown("### ℹ️ System Info")
-        st.markdown("**Model:** GPT-4o")
-        st.markdown("**Analysis Time:** ~60-90 sec")
-
-    # Header
-    st.markdown('<div class="main-header">📊 PCP Claims Investor Dashboard</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-header">Intelligent Multi-Agent Analysis System</div>', unsafe_allow_html=True)
+    # Main Dashboard
+    st.markdown('<div class="main-header">📊 Milberg PCP Claims Dashboard</div>', unsafe_allow_html=True)
 
     # File upload
-    st.markdown("### 📤 Upload Monthly Report")
-    uploaded_file = st.file_uploader(
-        "Upload Milberg Monthly Report (Excel)",
-        type=['xlsx', 'xls'],
-        help="Upload the Monthly Summary Excel file to generate comprehensive investor report"
-    )
+    uploaded_file = st.file_uploader("Upload Monthly Report Excel", type=['xlsx', 'xls'])
 
     if uploaded_file:
-        # Save uploaded file
         os.makedirs("uploads", exist_ok=True)
         temp_path = os.path.join("uploads", uploaded_file.name)
         with open(temp_path, "wb") as f:
             f.write(uploaded_file.getbuffer())
 
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            analyze_button = st.button("🤖 Generate Investor Report", type="primary", use_container_width=True)
+        if st.button("📊 Load Data", type="primary"):
+            with st.spinner("Loading data from Excel..."):
+                st.session_state.data = extract_monthly_report_data(temp_path)
+                st.success("Data loaded successfully!")
+                st.rerun()
 
-        # Analyze button
-        if analyze_button:
-            with st.spinner("🤖 AI Agents are analyzing... This may take 60-90 seconds..."):
+    # Display data if loaded
+    if st.session_state.data:
+        data = st.session_state.data
+        portfolio = data['portfolio_metrics']
+        lenders = data['lender_distribution']
+        costs = data['financial_costs']
+        pipeline = data['pipeline']
+        totals = data['portfolio_totals']
 
-                # Progress tracking
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-
-                try:
-                    status_text.text("📄 Priority Deed Agent: Reading profit distribution rules...")
-                    progress_bar.progress(20)
-
-                    result = generate_full_investor_report(temp_path)
-
-                    progress_bar.progress(100)
-                    status_text.empty()
-                    progress_bar.empty()
-
-                    st.session_state.analysis_result = result
-                    st.success("✅ Investor report generated successfully!")
-                    st.rerun()
-
-                except Exception as e:
-                    st.error(f"❌ Analysis failed: {str(e)}")
-                    st.exception(e)
-
-    # Display results
-    if st.session_state.analysis_result:
-        result = st.session_state.analysis_result
-        monthly_data = result['monthly_data']
-        investor_report = result['investor_report']
-        profit_rules = result['profit_rules']
+        # Get Priority Deed rules and calculate financials
+        priority_deed = read_priority_deed_rules()
+        financials = calculate_financial_projections(totals, costs, priority_deed)
 
         st.markdown("---")
 
-        # Key Metrics Dashboard
-        st.markdown("### 📊 Key Performance Indicators")
-
-        portfolio = monthly_data.get('portfolio_metrics', {})
-        lenders = monthly_data.get('lender_distribution', [])
-        financial = investor_report.get('financial_analysis', {})
-
+        # KPI Dashboard
         col1, col2, col3, col4, col5 = st.columns(5)
 
         with col1:
-            st.metric(
-                "Total Claims",
-                f"{portfolio.get('unique_claims', 0):,}",
-                help="Cumulative claims in portfolio"
-            )
+            st.metric("Total Claims", f"{totals['total_claims']:,}")
 
         with col2:
-            st.metric(
-                "Success Rate",
-                f"{portfolio.get('success_rate', 0):.1f}%",
-                f"{portfolio.get('claims_successful', 0)}/{portfolio.get('claims_submitted', 0)}",
-                help="Claims successful vs submitted"
-            )
+            st.metric("Total Clients", f"{portfolio['unique_clients_cumulative']:,}")
 
         with col3:
-            st.metric(
-                "Portfolio Value",
-                f"£{portfolio.get('total_settlement_value', 0)/1000:.0f}K",
-                help="Total settlement value"
-            )
+            st.metric("Lenders", f"{len(lenders)}")
 
         with col4:
-            st.metric(
-                "Expected Return",
-                f"£{financial.get('funder_expected_return', 0)/1000:.0f}K",
-                help="Funder's projected return"
-            )
+            st.metric("Portfolio Value", f"£{totals['total_estimated_value']/1000:.0f}K")
 
         with col5:
-            health_score = investor_report.get('executive_summary', {}).get('portfolio_health_score', 0)
-            st.metric(
-                "Health Score",
-                f"{health_score}/100",
-                help="Overall portfolio health"
-            )
+            st.metric("Funder Return", f"£{financials['funder_return']/1000:.1f}K")
 
         st.markdown("---")
 
-        # Main content tabs
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-            "📋 Executive Report",
-            "💰 Financial Analysis",
-            "⚖️ Compliance",
-            "📊 Portfolio Analytics",
-            "📈 Visualizations",
-            "📁 Raw Data"
+        # Main Tabs
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "🏦 Lenders",
+            "💰 Economic Analysis",
+            "⚖️ Compliance & Pipeline",
+            "📊 Portfolio Analysis"
         ])
 
+        # ==================== TAB 1: LENDERS ====================
         with tab1:
-            st.markdown("## Monthly Investor Report")
-            st.markdown(result['markdown_report'])
+            st.header("Lender Distribution & Analysis")
 
-            # Download buttons
-            col1, col2 = st.columns(2)
+            # Sort lenders by number of claims
+            df_lenders = pd.DataFrame(lenders).sort_values('num_claims', ascending=False)
+
+            col1, col2 = st.columns([1, 1])
 
             with col1:
-                st.download_button(
-                    label="📥 Download Report (Markdown)",
-                    data=result['markdown_report'],
-                    file_name=f"investor_report_{monthly_data.get('reporting_period', 'report').replace('/', '_')}.md",
-                    mime="text/markdown",
-                    use_container_width=True
+                # Network graph (Instagram-style)
+                st.subheader("Lender Network Visualization")
+
+                # Create network graph
+                fig = go.Figure()
+
+                # Top 15 lenders for cleaner visualization
+                top_lenders = df_lenders.head(15)
+
+                # Calculate positions in a circle
+                import math
+                n = len(top_lenders)
+                angles = [2 * math.pi * i / n for i in range(n)]
+
+                # Add edges (lines from center to each lender)
+                for i, (idx, lender) in enumerate(top_lenders.iterrows()):
+                    x_pos = math.cos(angles[i]) * (lender['num_claims'] / df_lenders['num_claims'].max())
+                    y_pos = math.sin(angles[i]) * (lender['num_claims'] / df_lenders['num_claims'].max())
+
+                    # Line from center to lender
+                    fig.add_trace(go.Scatter(
+                        x=[0, x_pos],
+                        y=[0, y_pos],
+                        mode='lines',
+                        line=dict(color='lightgray', width=1),
+                        showlegend=False,
+                        hoverinfo='skip'
+                    ))
+
+                    # Lender node
+                    fig.add_trace(go.Scatter(
+                        x=[x_pos],
+                        y=[y_pos],
+                        mode='markers+text',
+                        marker=dict(
+                            size=lender['num_claims'] * 3,
+                            color=lender['num_claims'],
+                            colorscale='Viridis',
+                            showscale=False,
+                            line=dict(width=2, color='white')
+                        ),
+                        text=[lender['lender'][:20]],
+                        textposition='top center',
+                        textfont=dict(size=8),
+                        hovertemplate=f"<b>{lender['lender']}</b><br>" +
+                                    f"Claims: {lender['num_claims']}<br>" +
+                                    f"Value: £{lender['estimated_value']:,.0f}<br>" +
+                                    f"Share: {lender['pct_of_total']:.1f}%<extra></extra>",
+                        showlegend=False
+                    ))
+
+                # Center node
+                fig.add_trace(go.Scatter(
+                    x=[0],
+                    y=[0],
+                    mode='markers+text',
+                    marker=dict(size=30, color='red', symbol='star'),
+                    text=['Portfolio<br>180 Claims'],
+                    textposition='middle center',
+                    textfont=dict(size=10, color='white'),
+                    showlegend=False,
+                    hoverinfo='skip'
+                ))
+
+                fig.update_layout(
+                    title="Top 15 Lenders - Network View",
+                    showlegend=False,
+                    height=600,
+                    xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)'
                 )
+
+                st.plotly_chart(fig, use_container_width=True)
 
             with col2:
-                # Generate Word document
-                word_doc = generate_word_report(
-                    result['markdown_report'],
-                    monthly_data,
-                    investor_report
-                )
+                # Top 10 Pie Chart
+                st.subheader("Top 10 Lenders by Claims")
 
-                st.download_button(
-                    label="📥 Download Report (Word)",
-                    data=word_doc,
-                    file_name=f"investor_report_{monthly_data.get('reporting_period', 'report').replace('/', '_')}.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    use_container_width=True
-                )
+                top10 = df_lenders.head(10)
+                others_claims = df_lenders.iloc[10:]['num_claims'].sum()
 
+                if others_claims > 0:
+                    pie_data = pd.concat([
+                        top10[['lender', 'num_claims']],
+                        pd.DataFrame([{'lender': 'Others', 'num_claims': others_claims}])
+                    ])
+                else:
+                    pie_data = top10[['lender', 'num_claims']]
+
+                fig_pie = px.pie(
+                    pie_data,
+                    values='num_claims',
+                    names='lender',
+                    hole=0.4
+                )
+                fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+                fig_pie.update_layout(height=600, showlegend=True)
+
+                st.plotly_chart(fig_pie, use_container_width=True)
+
+            # Lender Data Table
+            st.subheader("Complete Lender Data")
+
+            # Format the dataframe
+            df_display = df_lenders.copy()
+            df_display['estimated_value'] = df_display['estimated_value'].apply(lambda x: f"£{x:,.2f}")
+            df_display['avg_claim_value'] = df_display['avg_claim_value'].apply(lambda x: f"£{x:,.2f}")
+            df_display['pct_of_total'] = df_display['pct_of_total'].apply(lambda x: f"{x:.1f}%")
+
+            st.dataframe(
+                df_display,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "lender": st.column_config.TextColumn("Lender", width="large"),
+                    "num_claims": st.column_config.NumberColumn("Claims", width="small"),
+                    "pct_of_total": st.column_config.TextColumn("% of Total", width="small"),
+                    "estimated_value": st.column_config.TextColumn("Est. Value", width="medium"),
+                    "avg_claim_value": st.column_config.TextColumn("Avg/Claim", width="medium")
+                }
+            )
+
+            # Top 15 Horizontal Bar Chart
+            st.subheader("Top 15 Lenders by Portfolio Value")
+
+            top15_value = df_lenders.head(15).sort_values('estimated_value')
+
+            fig_bar = px.bar(
+                top15_value,
+                x='estimated_value',
+                y='lender',
+                orientation='h',
+                color='num_claims',
+                color_continuous_scale='Blues',
+                text=[f"£{v:,.0f}" for v in top15_value['estimated_value']]
+            )
+
+            fig_bar.update_traces(textposition='outside')
+            fig_bar.update_layout(
+                height=600,
+                xaxis_title="Portfolio Value (£)",
+                yaxis_title="",
+                yaxis={'categoryorder':'total ascending'},
+                showlegend=False
+            )
+
+            st.plotly_chart(fig_bar, use_container_width=True)
+
+        # ==================== TAB 2: ECONOMIC ANALYSIS ====================
         with tab2:
-            st.markdown("## Financial Performance Analysis")
+            st.header("Economic Analysis & Profit Distribution")
 
-            # Financial metrics
-            col1, col2 = st.columns(2)
+            # Financial Overview Cards
+            col1, col2, col3 = st.columns(3)
 
             with col1:
-                st.markdown("### Revenue & Proceeds")
-                st.metric("Total Settlement Value", f"£{financial.get('total_settlements', 0):,.2f}")
-                st.metric("DBA Proceeds (30%)", f"£{financial.get('dba_proceeds_expected', 0):,.2f}")
-                st.metric("Net Proceeds (After Costs)", f"£{financial.get('net_proceeds_after_costs', 0):,.2f}")
+                st.metric("Total Settlement Value", f"£{financials['total_settlement_value']:,.2f}")
+                st.caption("Estimated portfolio value")
 
             with col2:
-                st.markdown("### Returns & Performance")
-                st.metric("Funder Return", f"£{financial.get('funder_expected_return', 0):,.2f}")
-                st.metric("Firm Return", f"£{financial.get('firm_expected_return', 0):,.2f}")
-                st.metric("ROI Projection", f"{financial.get('roi_projection', 0):.1f}%")
-                st.metric("MOIC Projection", f"{financial.get('moic_projection', 0):.2f}x")
+                st.metric("DBA Proceeds (30%)", f"£{financials['dba_proceeds']:,.2f}")
+                st.caption("Revenue from settlements")
+
+            with col3:
+                st.metric("Total Costs", f"£{financials['total_costs']:,.2f}")
+                st.caption("All operational costs")
 
             st.markdown("---")
 
-            # Financial charts
-            col1, col2 = st.columns(2)
+            # Waterfall Chart
+            st.subheader("Financial Waterfall Analysis")
 
-            with col1:
-                st.plotly_chart(
-                    create_financial_waterfall(financial),
-                    use_container_width=True
-                )
+            fig_waterfall = go.Figure(go.Waterfall(
+                name="Cash Flow",
+                orientation="v",
+                measure=["absolute", "relative", "relative", "total"],
+                x=["Settlement Value", f"DBA Fee ({priority_deed['dba_rate']}%)", "Less: Costs", "Net Proceeds"],
+                y=[
+                    financials['total_settlement_value'],
+                    financials['dba_proceeds'] - financials['total_settlement_value'],
+                    -financials['total_costs'],
+                    financials['net_proceeds']
+                ],
+                text=[
+                    f"£{financials['total_settlement_value']:,.0f}",
+                    f"£{financials['dba_proceeds']:,.0f}",
+                    f"-£{financials['total_costs']:,.0f}",
+                    f"£{financials['net_proceeds']:,.0f}"
+                ],
+                textposition="outside",
+                connector={"line": {"color": "rgb(63, 63, 63)"}},
+                increasing={"marker": {"color": "#2ecc71"}},
+                decreasing={"marker": {"color": "#e74c3c"}},
+                totals={"marker": {"color": "#3498db"}}
+            ))
 
-            with col2:
-                st.plotly_chart(
-                    create_profit_split_chart(financial, profit_rules),
-                    use_container_width=True
-                )
-
-            # Cost breakdown
-            st.plotly_chart(
-                create_cost_breakdown_chart(monthly_data.get('financial_metrics', {})),
-                use_container_width=True
+            fig_waterfall.update_layout(
+                title="From Settlement to Net Proceeds",
+                height=500,
+                showlegend=False
             )
 
-        with tab3:
-            st.markdown("## FCA Compliance Assessment")
+            st.plotly_chart(fig_waterfall, use_container_width=True)
 
-            compliance = investor_report.get('compliance_assessment', {})
+            st.markdown("---")
 
-            # Compliance status
-            status = compliance.get('fca_compliance_status', 'unknown')
-            status_colors = {
-                'compliant': '🟢',
-                'review_required': '🟡',
-                'at_risk': '🔴'
-            }
-
-            st.markdown(f"### {status_colors.get(status, '⚪')} Compliance Status: {status.upper().replace('_', ' ')}")
-
-            col1, col2 = st.columns([2, 1])
+            # Profit Distribution
+            col1, col2 = st.columns([1, 1])
 
             with col1:
-                st.markdown("### Commission Analysis")
-                st.info(compliance.get('commission_analysis', 'No analysis available'))
+                st.subheader("Profit Distribution (Priority Deed)")
 
-                st.markdown("### Required Actions")
-                for action in compliance.get('compliance_actions_needed', []):
-                    st.warning(f"⚠️ {action}")
+                # Profit split pie chart
+                fig_split = go.Figure(data=[go.Pie(
+                    labels=[
+                        f'Funder ({priority_deed["funder_percentage"]}%)',
+                        f'Law Firm ({priority_deed["firm_percentage"]}%)'
+                    ],
+                    values=[financials['funder_return'], financials['firm_return']],
+                    hole=0.4,
+                    marker_colors=['#3498db', '#2ecc71'],
+                    text=[
+                        f"£{financials['funder_return']:,.0f}",
+                        f"£{financials['firm_return']:,.0f}"
+                    ],
+                    textinfo='label+text',
+                    textposition='inside'
+                )])
+
+                fig_split.update_layout(
+                    height=400,
+                    annotations=[dict(
+                        text=f'Net Proceeds<br>£{financials["net_proceeds"]:,.0f}',
+                        x=0.5, y=0.5,
+                        font_size=14,
+                        showarrow=False
+                    )]
+                )
+
+                st.plotly_chart(fig_split, use_container_width=True)
+
+                st.info(f"""
+                **Priority Deed Terms:**
+                - DBA Rate: {priority_deed['dba_rate']}% of settlements
+                - Split: {priority_deed['funder_percentage']}/{priority_deed['firm_percentage']} after costs
+                - Cost recovery: First priority
+                """)
 
             with col2:
-                st.metric("Claims at Risk", compliance.get('claims_at_risk', 0))
+                st.subheader("Performance Metrics")
 
-                st.markdown("### Compliance Rules")
-                st.json({
-                    "FCA Thresholds": result.get('compliance_rules', {}).get('commission_thresholds', {}),
-                    "Eligible Products": result.get('compliance_rules', {}).get('eligible_products', [])
+                # ROI and MOIC
+                metrics_df = pd.DataFrame({
+                    'Metric': ['Funder Return', 'Firm Return', 'ROI', 'MOIC'],
+                    'Value': [
+                        f"£{financials['funder_return']:,.2f}",
+                        f"£{financials['firm_return']:,.2f}",
+                        f"{financials['roi']:.1f}%",
+                        f"{financials['moic']:.2f}x"
+                    ],
+                    'Description': [
+                        '80% of net proceeds',
+                        '20% of net proceeds',
+                        'Return on Investment',
+                        'Multiple on Invested Capital'
+                    ]
                 })
 
-        with tab4:
-            st.markdown("## Portfolio Composition & Analytics")
+                st.dataframe(metrics_df, use_container_width=True, hide_index=True)
 
-            # Lender concentration
-            lender_conc = investor_report.get('lender_concentration', {})
+                # Cost Breakdown
+                st.subheader("Cost Breakdown")
+
+                cost_data = pd.DataFrame({
+                    'Category': ['Acquisition', 'Submission', 'Processing', 'Legal'],
+                    'Amount': [
+                        costs['acquisition_cost_cumulative'],
+                        costs['submission_cost_cumulative'],
+                        costs['processing_cost'],
+                        costs['legal_cost']
+                    ]
+                })
+
+                fig_costs = px.bar(
+                    cost_data,
+                    x='Category',
+                    y='Amount',
+                    text=[f"£{v:,.2f}" for v in cost_data['Amount']],
+                    color='Amount',
+                    color_continuous_scale='Reds'
+                )
+
+                fig_costs.update_traces(textposition='outside')
+                fig_costs.update_layout(height=350, showlegend=False)
+
+                st.plotly_chart(fig_costs, use_container_width=True)
+
+        # ==================== TAB 3: COMPLIANCE & PIPELINE ====================
+        with tab3:
+            st.header("Pipeline Status & Compliance")
+
+            # Pipeline Overview
+            st.subheader("Claims Pipeline by Stage")
+
+            pipeline_data = pd.DataFrame([
+                {'Stage': 'Awaiting DSAR', 'Count': pipeline['awaiting_dsar']['count'], 'Value': pipeline['awaiting_dsar']['value']},
+                {'Stage': 'Pending Submission', 'Count': pipeline['pending_submission']['count'], 'Value': pipeline['pending_submission']['value']},
+                {'Stage': 'Under Review', 'Count': pipeline['under_review']['count'], 'Value': pipeline['under_review']['value']},
+                {'Stage': 'Settlement Offered', 'Count': pipeline['settlement_offered']['count'], 'Value': pipeline['settlement_offered']['value']},
+                {'Stage': 'Paid', 'Count': pipeline['paid']['count'], 'Value': pipeline['paid']['value']}
+            ])
+
+            col1, col2 = st.columns([1, 1])
+
+            with col1:
+                # Funnel chart
+                fig_funnel = go.Figure(go.Funnel(
+                    y=pipeline_data['Stage'],
+                    x=pipeline_data['Count'],
+                    textinfo="value+percent initial",
+                    marker={"color": ["#3498db", "#2ecc71", "#f39c12", "#9b59b6", "#1abc9c"]}
+                ))
+
+                fig_funnel.update_layout(title="Pipeline Funnel (by Count)", height=500)
+
+                st.plotly_chart(fig_funnel, use_container_width=True)
+
+            with col2:
+                # Stacked bar chart by value
+                fig_pipeline_val = px.bar(
+                    pipeline_data,
+                    x='Stage',
+                    y='Value',
+                    text=[f"£{v:,.0f}" for v in pipeline_data['Value']],
+                    color='Stage',
+                    color_discrete_sequence=px.colors.qualitative.Set2
+                )
+
+                fig_pipeline_val.update_traces(textposition='outside')
+                fig_pipeline_val.update_layout(
+                    title="Pipeline Value by Stage",
+                    height=500,
+                    showlegend=False,
+                    xaxis_title="",
+                    yaxis_title="Value (£)"
+                )
+
+                st.plotly_chart(fig_pipeline_val, use_container_width=True)
+
+            # Pipeline Data Table
+            st.subheader("Pipeline Breakdown Data")
+
+            pipeline_display = pipeline_data.copy()
+            pipeline_display['Value'] = pipeline_display['Value'].apply(lambda x: f"£{x:,.2f}")
+
+            st.dataframe(pipeline_display, use_container_width=True, hide_index=True)
+
+            st.markdown("---")
+
+            # Portfolio Growth
+            st.subheader("Portfolio Growth Metrics")
+
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                st.metric("Current Month Claims", portfolio['unique_claims_current'])
+
+            with col2:
+                st.metric("Current Month Clients", portfolio['unique_clients_current'])
+
+            with col3:
+                st.metric("Cumulative Claims", portfolio['unique_claims_cumulative'])
+
+            with col4:
+                st.metric("Cumulative Clients", portfolio['unique_clients_cumulative'])
+
+        # ==================== TAB 4: PORTFOLIO ANALYSIS ====================
+        with tab4:
+            st.header("Comprehensive Portfolio Analysis")
+
+            # Concentration Analysis
+            st.subheader("Lender Concentration Risk")
+
+            # Calculate concentration
+            top5_claims = df_lenders.head(5)['num_claims'].sum()
+            top10_claims = df_lenders.head(10)['num_claims'].sum()
+            concentration_top5 = (top5_claims / totals['total_claims']) * 100
+            concentration_top10 = (top10_claims / totals['total_claims']) * 100
 
             col1, col2, col3 = st.columns(3)
 
             with col1:
-                st.metric("Total Lenders", lender_conc.get('total_lenders', 0))
+                st.metric("Top 5 Concentration", f"{concentration_top5:.1f}%")
+                st.caption(f"{top5_claims} claims out of {totals['total_claims']}")
 
             with col2:
-                st.metric("Diversification Score", f"{lender_conc.get('diversification_score', 0)}/100")
+                st.metric("Top 10 Concentration", f"{concentration_top10:.1f}%")
+                st.caption(f"{top10_claims} claims out of {totals['total_claims']}")
 
             with col3:
-                risk = lender_conc.get('concentration_risk', 'unknown')
-                risk_colors = {'low': '🟢', 'medium': '🟡', 'high': '🔴'}
-                st.metric("Concentration Risk", f"{risk_colors.get(risk, '⚪')} {risk.upper()}")
+                diversification_score = 100 - concentration_top5
+                st.metric("Diversification Score", f"{diversification_score:.1f}/100")
+                st.caption("Higher is better")
+
+            # Concentration risk indicator
+            if concentration_top5 > 50:
+                st.warning("⚠️ High Concentration Risk: Top 5 lenders represent >50% of portfolio")
+            elif concentration_top5 > 30:
+                st.info("ℹ️ Moderate Concentration: Top 5 lenders represent 30-50% of portfolio")
+            else:
+                st.success("✅ Low Concentration: Well-diversified portfolio")
 
             st.markdown("---")
 
-            # Charts
-            col1, col2 = st.columns(2)
+            # Claims Distribution
+            col1, col2 = st.columns([1, 1])
 
             with col1:
-                st.plotly_chart(
-                    create_lender_distribution_chart(lenders),
-                    use_container_width=True
+                st.subheader("Claims Distribution by Lender Size")
+
+                # Categorize lenders
+                df_lenders['Category'] = pd.cut(
+                    df_lenders['num_claims'],
+                    bins=[0, 2, 5, 10, 999],
+                    labels=['Small (1-2)', 'Medium (3-5)', 'Large (6-10)', 'Very Large (10+)']
                 )
+
+                category_dist = df_lenders.groupby('Category', observed=False).agg({
+                    'num_claims': 'sum',
+                    'lender': 'count'
+                }).reset_index()
+                category_dist.columns = ['Category', 'Total Claims', 'Number of Lenders']
+
+                fig_cat = px.bar(
+                    category_dist,
+                    x='Category',
+                    y='Total Claims',
+                    text='Total Claims',
+                    color='Number of Lenders',
+                    color_continuous_scale='Viridis'
+                )
+
+                fig_cat.update_traces(textposition='outside')
+                fig_cat.update_layout(height=400)
+
+                st.plotly_chart(fig_cat, use_container_width=True)
 
             with col2:
-                st.plotly_chart(
-                    create_portfolio_overview_chart(portfolio),
-                    use_container_width=True
+                st.subheader("Value Distribution")
+
+                # Value ranges
+                df_lenders['Value_Category'] = pd.cut(
+                    df_lenders['estimated_value'],
+                    bins=[0, 2000, 5000, 10000, 999999],
+                    labels=['<£2K', '£2-5K', '£5-10K', '>£10K']
                 )
 
-            # Top lenders table
-            st.markdown("### Top 5 Lenders by Volume")
-            top_lenders = lender_conc.get('top_5_lenders', [])
-            if top_lenders:
-                df_top = pd.DataFrame(top_lenders)
-                st.dataframe(df_top, use_container_width=True, hide_index=True)
+                value_dist = df_lenders.groupby('Value_Category', observed=False).agg({
+                    'estimated_value': 'sum',
+                    'lender': 'count'
+                }).reset_index()
+                value_dist.columns = ['Value Range', 'Total Value', 'Count']
 
-        with tab5:
-            st.markdown("## Visual Analytics")
+                fig_val = px.pie(
+                    value_dist,
+                    values='Total Value',
+                    names='Value Range',
+                    hole=0.4
+                )
 
-            # Pipeline funnel
-            st.plotly_chart(
-                create_pipeline_funnel(monthly_data.get('pipeline', {})),
-                use_container_width=True
-            )
+                fig_val.update_layout(height=400)
 
-            # Lender value chart
-            st.plotly_chart(
-                create_lender_value_chart(lenders),
-                use_container_width=True
-            )
+                st.plotly_chart(fig_val, use_container_width=True)
 
-            # All lenders table
-            st.markdown("### All Lenders")
-            df_lenders = pd.DataFrame(lenders)
-            st.dataframe(
-                df_lenders,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "estimated_value": st.column_config.NumberColumn(
-                        "Estimated Value",
-                        format="£%.2f"
-                    ),
-                    "avg_claim_value": st.column_config.NumberColumn(
-                        "Avg Claim Value",
-                        format="£%.2f"
-                    ),
-                    "pct_of_total": st.column_config.NumberColumn(
-                        "% of Total",
-                        format="%.2f%%"
-                    )
-                }
-            )
+            st.markdown("---")
 
-        with tab6:
-            st.markdown("## Raw Extracted Data")
+            # Summary Statistics
+            st.subheader("Portfolio Statistics Summary")
 
-            st.markdown("### Portfolio Metrics")
-            st.json(portfolio)
+            stats_df = pd.DataFrame({
+                'Metric': [
+                    'Total Lenders',
+                    'Total Claims',
+                    'Total Portfolio Value',
+                    'Average Claims per Lender',
+                    'Average Value per Lender',
+                    'Largest Lender (by claims)',
+                    'Largest Lender (by value)',
+                    'Smallest Active Lender'
+                ],
+                'Value': [
+                    f"{len(lenders)}",
+                    f"{totals['total_claims']}",
+                    f"£{totals['total_estimated_value']:,.2f}",
+                    f"{totals['total_claims'] / len(lenders):.1f}",
+                    f"£{totals['total_estimated_value'] / len(lenders):,.2f}",
+                    f"{df_lenders.iloc[0]['lender']} ({df_lenders.iloc[0]['num_claims']} claims)",
+                    f"{df_lenders.sort_values('estimated_value', ascending=False).iloc[0]['lender']} (£{df_lenders.sort_values('estimated_value', ascending=False).iloc[0]['estimated_value']:,.2f})",
+                    f"{df_lenders.iloc[-1]['lender']} ({df_lenders.iloc[-1]['num_claims']} claims)"
+                ]
+            })
 
-            st.markdown("### Financial Metrics")
-            st.json(monthly_data.get('financial_metrics', {}))
-
-            st.markdown("### Pipeline Status")
-            st.json(monthly_data.get('pipeline', {}))
-
-            st.markdown("### Forecasting")
-            st.json(monthly_data.get('forecasting', {}))
-
-            st.markdown("### Profit Distribution Rules")
-            st.json(profit_rules)
-
-            st.markdown("### Full Investor Report Data")
-            st.json(investor_report)
+            st.dataframe(stats_df, use_container_width=True, hide_index=True)
 
     else:
-        # Show info when no file uploaded
-        st.info("👆 Upload a monthly Excel report and click 'Generate Investor Report' to start the AI analysis")
+        st.info("👆 Please upload a Milberg Monthly Report Excel file to view the dashboard")
 
-        st.markdown("---")
-
-        st.markdown("### 🤖 How It Works")
-
-        col1, col2, col3, col4 = st.columns(4)
-
-        with col1:
-            st.markdown("""
-            **1️⃣ Priority Deed Agent**
-
-            Reads the Priority Deed document and extracts:
-            - Profit split percentages
-            - DBA rate (30%)
-            - Cost recovery rules
-            - Payment waterfall
-            """)
-
-        with col2:
-            st.markdown("""
-            **2️⃣ FCA Compliance Agent**
-
-            Reads FCA Redress Scheme and validates:
-            - Commission thresholds
-            - Eligible products
-            - Required disclosures
-            - Compliance criteria
-            """)
-
-        with col3:
-            st.markdown("""
-            **3️⃣ Monthly Report Agent**
-
-            Analyzes Excel report to extract:
-            - Portfolio metrics
-            - All lender data (50-70 lenders)
-            - Pipeline breakdown
-            - Financial costs
-            - Forecasting data
-            """)
-
-        with col4:
-            st.markdown("""
-            **4️⃣ Investor Report Agent**
-
-            Combines all insights to generate:
-            - Executive summary
-            - Financial analysis
-            - Compliance assessment
-            - Risk analysis
-            - Action items
-            """)
+        # Logout button
+        if st.button("🚪 Logout"):
+            st.session_state.logged_in = False
+            st.rerun()
 
     # Footer
     st.markdown("---")
-    st.markdown("*Powered by OpenAI GPT-4o • 4-Agent Intelligent System • Factual Data-Driven Analysis*")
+    st.markdown("*Milberg PCP Claims Dashboard • Direct Data Extraction • No AI Summaries*")
