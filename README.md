@@ -1,365 +1,411 @@
-# PCP Claim Funding Management - Agentic System
+# PCP Claims Analysis - AI Multi-Agent System
 
-A comprehensive agentic system for managing PCP (Personal Contract Purchase) claim funding, designed specifically for UK litigation funders and investors.
+## 🎯 Overview
 
-## 🎯 Features
+Intelligent multi-agent system for analyzing PCP (Personal Contract Purchase) claims portfolios and generating comprehensive monthly investor reports using OpenAI GPT-4o.
 
-### Core Capabilities
-- **Document Processing**: Automatically extract structured data from law firm claim reports
-- **LFA Compliance Checking**: Validate claims against Litigation Funding Agreement terms
-- **Multi-Report Generation**: 
-  - Investor Reports (portfolio-wide)
-  - IC Reports (Investment Committee analysis)
-  - Compliance Reports
-- **Legal Strategy Insights**: UK-specific legal guidance for PCP claims
-- **Portfolio Management**: Track multiple claims, funding utilization, and returns
-- **REST API**: Web-based API for integration with other systems
+## 🤖 The 4 Intelligent Agents
 
-### Compliance Checks
-- Funding cap validation
-- Jurisdiction verification
-- Documentation completeness
-- Adverse costs insurance requirements
-- Return multiple analysis
+### 1️⃣ Priority Deed Agent
+**Purpose:** Reads profit distribution agreements
 
-### Reports Generated
-1. **Investor Reports**: Portfolio overview, returns analysis, risk metrics
-2. **IC Reports**: Detailed claim analysis, compliance status, risk assessment, recommendations
-3. **Legal Strategy Reports**: Case-specific guidance, milestone tracking, cost management
+**What it does:**
+- Reads Priority Deed Word document
+- Extracts profit split rules (Funder/Law Firm percentages)
+- Extracts DBA rate (typically 30% of settlements)
+- Identifies cost recovery waterfall
+- Calculates profit distributions
 
-## 📁 Project Structure
+**Input:** `DOCS/Priorities Deed (EV 9 October 2025).docx`
 
-```
-pcp-funding-system/
-├── pcp_funding_agent.py      # Main agent system
-├── document_processor.py      # Document extraction engine
-├── api_server.py             # REST API interface
-├── requirements.txt          # Python dependencies
-├── README.md                 # This file
-├── uploads/                  # Uploaded claim reports
-└── reports/                  # Generated reports
-```
+### 2️⃣ FCA Compliance Agent
+**Purpose:** Validates claims against FCA Redress Scheme
 
-## 🚀 Quick Start
+**What it does:**
+- Reads FCA Redress Scheme PDF (3.6MB, 20 pages extracted)
+- Extracts commission thresholds
+- Identifies eligible products
+- Validates claim compliance
+- Flags non-compliant claims
 
-### Installation
+**Input:** `FCA redress scheme/Redress Scheme.pdf`
 
-1. **Clone or download the system files**
+### 3️⃣ Monthly Report Agent
+**Purpose:** Extracts data from monthly Excel reports
 
-2. **Install dependencies**:
-```bash
-pip install -r requirements.txt
-```
+**What it does:**
+- Reads Excel monthly reports
+- Extracts portfolio metrics (claims, clients, success rates)
+- Extracts ALL lenders (50-70 lenders with accurate counts)
+- Extracts pipeline breakdown by stage
+- Extracts financial costs and forecasting
 
-3. **Run the demo**:
-```bash
-# Test the core agent
-python pcp_funding_agent.py
+**Input:** Monthly Summary Excel file
 
-# Test document processing
-python document_processor.py
+### 4️⃣ Investor Report Agent
+**Purpose:** Master agent that generates comprehensive reports
 
-# Start the API server
-python api_server.py
-```
+**What it does:**
+- Combines insights from all 3 specialist agents
+- Calculates financial returns using Priority Deed rules
+- Assesses FCA compliance using Redress Scheme rules
+- Generates executive summary with portfolio health score
+- Creates detailed financial analysis with ROI/MOIC
+- Provides risk assessment and action items
+- Outputs both JSON and formatted Markdown
 
-## 📖 Usage Guide
-
-### 1. Command Line Usage
-
-#### Load LFA and Process Claims
-```python
-from pcp_funding_agent import PCPFundingAgent
-
-# Initialize agent
-agent = PCPFundingAgent()
-
-# Load LFA terms
-lfa_data = {
-    "agreement_id": "LFA-2024-001",
-    "funding_cap": 500000.0,
-    "success_fee_percentage": 25.0,
-    "minimum_return_multiple": 2.0,
-    "permitted_expenses": ["legal_fees", "court_fees", "expert_witnesses", "insurance"],
-    "reporting_frequency": "monthly",
-    "termination_conditions": ["breach_of_terms", "insolvency"],
-    "jurisdiction": "UK",
-    "adverse_costs_insurance_required": True
-}
-agent.load_lfa(lfa_data)
-
-# Ingest claim
-claim_report = {
-    "claim_id": "PCP-2024-1234",
-    "claimant_name": "John Smith",
-    "defendant": "Premium Auto Finance Ltd",
-    "claim_amount": 85000.0,
-    "funded_amount": 35000.0,
-    "claim_date": "2024-03-15",
-    "status": "in_progress",
-    "law_firm": "Legal Partners LLP",
-    "case_reference": "LP/PCP/2024/1234",
-    "documentation_received": ["claim_form", "lfa_signed", "insurance_policy"],
-    "last_update": "2024-12-01"
-}
-agent.ingest_claim_report(claim_report)
-
-# Check compliance
-compliance = agent.check_lfa_compliance("PCP-2024-1234")
-
-# Generate reports
-ic_report = agent.generate_ic_report("PCP-2024-1234")
-investor_report = agent.generate_investor_report()
-strategy = agent.get_legal_strategy_insights("PCP-2024-1234")
-```
-
-#### Process Law Firm Reports
-```python
-from document_processor import DocumentProcessor
-
-processor = DocumentProcessor()
-
-# Process uploaded document
-extracted_data = processor.process_law_firm_report("report.txt")
-
-# Validate extraction
-validation = processor.validate_extracted_data(extracted_data)
-
-# Extract specific information
-milestones = processor.extract_case_milestones(text)
-financials = processor.extract_financial_summary(text)
-```
-
-### 2. API Usage
-
-Start the API server:
-```bash
-python api_server.py
-```
-
-The API will be available at `http://localhost:5000`
-
-#### API Endpoints
-
-**Load LFA Terms**
-```bash
-curl -X POST http://localhost:5000/api/lfa/load \
-  -H "Content-Type: application/json" \
-  -d '{
-    "agreement_id": "LFA-2024-001",
-    "funding_cap": 500000.0,
-    "success_fee_percentage": 25.0,
-    "minimum_return_multiple": 2.0,
-    "permitted_expenses": ["legal_fees", "court_fees"],
-    "reporting_frequency": "monthly",
-    "termination_conditions": ["breach_of_terms"],
-    "jurisdiction": "UK",
-    "adverse_costs_insurance_required": true
-  }'
-```
-
-**Upload Claim Report**
-```bash
-curl -X POST http://localhost:5000/api/claims/upload \
-  -F "file=@claim_report.txt"
-```
-
-**Check Compliance**
-```bash
-curl http://localhost:5000/api/compliance/check/PCP-2024-1234
-```
-
-**Generate IC Report**
-```bash
-curl http://localhost:5000/api/reports/ic/PCP-2024-1234
-```
-
-**Generate Investor Report**
-```bash
-curl http://localhost:5000/api/reports/investor
-```
-
-**Get Dashboard Data**
-```bash
-curl http://localhost:5000/api/dashboard
-```
-
-**Get Legal Strategy**
-```bash
-curl http://localhost:5000/api/strategy/PCP-2024-1234
-```
-
-## 🔍 Sample Claim Report Format
-
-The system can extract data from text reports in this format:
-
-```
-LEGAL PARTNERS LLP
-Claim Progress Report
-
-Claim Reference: PCP/2024/5678
-Date: 15/11/2024
-
-Claimant: Sarah Johnson
-Defendant: Auto Finance Solutions Limited
-
-FINANCIAL SUMMARY
-Claim Amount: £95,500.00
-Funded Amount: £42,000.00
-
-Status: In Progress
-
-COSTS BREAKDOWN
-Solicitor Fees: £18,500.00
-Court Fees: £2,500.00
-Expert Witness Fees: £5,000.00
-ATE Insurance Premium: £8,000.00
-
-DOCUMENTATION
-- Claim Form completed and filed
-- Litigation Funding Agreement signed
-- ATE Insurance policy in place
-- Expert Report commissioned
-
-CASE MILESTONES
-Claim Filed: 10/09/2024
-Defense Received: 25/09/2024
-Disclosure deadline: 15/12/2024
-Trial Date: 15/03/2025
-```
-
-## 📊 Report Types
-
-### 1. Investor Report
-- Portfolio summary (total claims, funded amount, claim values)
-- Status breakdown of all claims
-- Return multiples and potential returns
-- Risk metrics (concentration, exposure)
-- LFA utilization tracking
-
-### 2. IC (Investment Committee) Report
-- Detailed claim analysis
-- Financial metrics (funded amount, claim value, return multiple)
-- Full compliance status with specific checks
-- Risk assessment (rating, factors, mitigation)
-- Recommendation (Approve/Hold/Review)
-
-### 3. Legal Strategy Report
-- UK jurisdiction-specific guidance
-- PCP mis-selling legal framework
-- Litigation strategy recommendations
-- Cost management advice
-- Status-specific action items
-
-## 🔐 Compliance Framework
-
-The system checks:
-1. **Funding Cap**: Ensures funded amount doesn't exceed LFA limits
-2. **Jurisdiction**: Validates UK jurisdiction requirement
-3. **Documentation**: Verifies required documents are received
-4. **Insurance**: Confirms ATE insurance is in place
-5. **Returns**: Validates minimum return multiples
-
-## 🎓 UK PCP Legal Context
-
-The system provides guidance on:
-- **Commission Disclosure**: FCA requirements and Plevin v Paragon precedent
-- **Time Limits**: 6-year limitation period or 3 years from knowledge
-- **Litigation Strategy**: Pre-action protocols, ADR, court procedures
-- **Financial Ombudsman**: Jurisdiction and processes
-- **Cost Protection**: QOCS, ATE insurance, costs management
-
-## 🛠️ Customization
-
-### Adding New Compliance Checks
-
-Edit `pcp_funding_agent.py`, `check_lfa_compliance()` method:
-
-```python
-# Add custom check
-compliance_checks.append(ComplianceCheck(
-    check_name="Your Check Name",
-    status=ComplianceStatus.COMPLIANT,  # or NON_COMPLIANT or REQUIRES_REVIEW
-    details="Description of check result",
-    recommendation="Action if needed"
-))
-```
-
-### Extending Document Processing
-
-Edit `document_processor.py`, `_compile_patterns()` method:
-
-```python
-# Add new extraction pattern
-"new_field": re.compile(r"YourPattern", re.IGNORECASE)
-```
-
-### Adding New Report Types
-
-Create new method in `PCPFundingAgent` class:
-
-```python
-def generate_custom_report(self, claim_id: str) -> Dict[str, Any]:
-    claim = self.claims_data.get(claim_id)
-    # Your report logic
-    return report_data
-```
-
-## 📈 Future Enhancements
-
-Potential additions:
-- [ ] PDF/DOCX direct parsing (PyPDF2, python-docx integration)
-- [ ] Claude API integration for intelligent document understanding
-- [ ] Automated email notifications for compliance issues
-- [ ] Excel export for reports
-- [ ] Database integration (PostgreSQL/MongoDB)
-- [ ] Advanced analytics and forecasting
-- [ ] Multi-currency support
-- [ ] Automated settlement calculation
-- [ ] Calendar integration for deadline tracking
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-**Import Errors**
-```bash
-# Ensure all dependencies are installed
-pip install -r requirements.txt --upgrade
-```
-
-**API Port Already in Use**
-```bash
-# Change port in api_server.py
-app.run(debug=True, host='0.0.0.0', port=5001)  # Use different port
-```
-
-**Document Processing Fails**
-- Ensure text encoding is UTF-8 or Latin-1
-- Check that required fields are present in the document
-- Validate date formats (DD/MM/YYYY or YYYY-MM-DD)
-
-## 📝 License
-
-This system is provided for internal use in managing PCP claim funding. 
-
-## 🤝 Support
-
-For questions or issues:
-1. Review this documentation
-2. Check the code comments in each module
-3. Examine the demo/example code at the bottom of each file
-
-## 🔄 Version History
-
-- **v1.0.0** (December 2024)
-  - Initial release
-  - Core agent functionality
-  - Document processing
-  - REST API
-  - Multiple report types
-  - UK legal strategy guidance
+**Output:** Complete investor report
 
 ---
 
-**Built for UK litigation funders to efficiently manage PCP claim portfolios with automated compliance and reporting.**
+## 📊 Dashboard Features
+
+### Interactive Visualizations
+
+1. **Portfolio Overview**
+   - Claims by status (bar chart)
+   - Success rate metrics
+   - Portfolio value tracking
+
+2. **Financial Waterfall**
+   - Settlement → DBA Proceeds → Costs → Net Proceeds
+   - Visual profit distribution flow
+
+3. **Profit Split Chart**
+   - Funder vs Firm distribution (pie chart)
+   - Actual monetary values
+
+4. **Lender Analytics**
+   - Top 10 lenders (pie chart)
+   - Top 15 by value (horizontal bar)
+   - Concentration risk analysis
+
+5. **Pipeline Funnel**
+   - Claims progression through stages
+   - Conversion rates visualization
+
+6. **Cost Breakdown**
+   - Acquisition, submission, processing, legal costs
+   - Cost efficiency metrics
+
+### Dashboard Tabs
+
+**📋 Executive Report**
+- Complete investor report in markdown
+- Download as Markdown or Word document
+- Includes all sections with specific metrics
+
+**💰 Financial Analysis**
+- Revenue breakdown
+- Profit distribution calculations
+- ROI and MOIC projections
+- Interactive financial charts
+
+**⚖️ Compliance**
+- FCA compliance status (🟢🟡🔴)
+- Commission analysis vs thresholds
+- Claims at risk
+- Required compliance actions
+
+**📊 Portfolio Analytics**
+- Lender concentration analysis
+- Diversification score
+- Top lenders by volume and value
+- Portfolio composition charts
+
+**📈 Visualizations**
+- Pipeline funnel
+- All lender value charts
+- Complete lender data table
+- Interactive filters
+
+**📁 Raw Data**
+- All extracted JSON data
+- Portfolio metrics
+- Financial data
+- Pipeline status
+- Profit distribution rules
+
+---
+
+## 🚀 System Workflow
+
+```
+1. Upload Monthly Excel Report
+         ↓
+2. Priority Deed Agent reads profit rules
+         ↓
+3. FCA Compliance Agent reads redress scheme
+         ↓
+4. Monthly Report Agent extracts Excel data
+         ↓
+5. Investor Report Agent generates comprehensive report
+         ↓
+6. Dashboard displays results with visualizations
+```
+
+**Processing Time:** 60-90 seconds
+
+---
+
+## 📁 File Structure
+
+```
+pcp_AGI_system/
+├── intelligent_agents.py          # 4 AI agents (698 lines)
+├── milberg_streamlit_demo.py      # Dashboard with visualizations (758 lines)
+├── requirements.txt                # Dependencies
+├── README.md                       # This file
+├── DOCS/
+│   └── Priorities Deed (EV 9 October 2025).docx
+├── FCA redress scheme/
+│   └── Redress Scheme.pdf
+└── uploads/                        # Excel file uploads
+```
+
+**Total:** 2 Python files, 1,456 lines of code
+
+---
+
+## 🔧 Installation & Deployment
+
+### Requirements
+
+```txt
+streamlit>=1.28.0       # Web framework
+pandas>=2.0.0           # Data processing
+openpyxl>=3.1.0         # Excel reading
+openai>=1.0.0           # AI agents
+plotly>=5.17.0          # Interactive charts
+matplotlib>=3.5.0       # Additional charts
+python-docx>=1.0.0      # Word document generation
+PyPDF2>=3.0.0           # PDF reading
+```
+
+### Local Development
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Set OpenAI API key
+export OPENAI_API_KEY="your-key-here"
+
+# Run dashboard
+streamlit run milberg_streamlit_demo.py
+```
+
+### Streamlit Cloud Deployment
+
+1. Push to GitHub
+2. Connect to Streamlit Cloud
+3. Add secrets in Streamlit dashboard:
+   ```toml
+   OPENAI_API_KEY = "your-key-here"
+   ```
+4. Deploy
+
+---
+
+## 🔐 Authentication
+
+**Built-in user accounts:**
+- `admin` / `Admin123!`
+- `walter` / `Walter123!`
+- `dirk` / `Dirk123!`
+- `eda` / `Eda123!`
+
+Passwords are hashed with SHA-256.
+
+---
+
+## 📊 Sample Output
+
+### Executive Summary
+```
+Portfolio Health Score: 85/100
+
+Key Metrics:
+- Total Claims: 180 across 61 lenders
+- Success Rate: 45.5% (50/110 submitted)
+- Portfolio Value: £2.4M
+- Expected Funder Return: £384K (80%)
+- Expected Firm Return: £96K (20%)
+```
+
+### Financial Analysis
+```
+Total Settlement Value: £2,400,000
+DBA Proceeds (30%):     £720,000
+Less: Total Costs:      £240,000
+Net Proceeds:           £480,000
+
+Funder Share (80%):     £384,000
+Firm Share (20%):       £96,000
+
+ROI Projection:         60%
+MOIC Projection:        1.6x
+```
+
+### Compliance Assessment
+```
+Status: 🟢 COMPLIANT
+
+Commission Analysis:
+- Average commission: 12.5%
+- FCA threshold: 50%
+- Claims at risk: 0
+```
+
+---
+
+## 💡 Key Features
+
+### ✅ Intelligent Data Extraction
+- AI reads entire Excel sheets intelligently
+- Extracts ALL lenders (not just first few)
+- Zero synthetic data - uses actual numbers
+- Handles currency conversion automatically
+
+### ✅ Document Understanding
+- Reads Word documents (Priority Deed)
+- Reads PDF documents (FCA Redress Scheme)
+- Extracts structured rules and thresholds
+- Applies rules to validate claims
+
+### ✅ Factual Analysis
+- No opinions - only data-driven observations
+- Specific numbers for every metric
+- Shows calculations and reasoning
+- Objective risk assessment
+
+### ✅ Professional Reporting
+- Executive-level investor reports
+- Interactive visualizations
+- Export to Markdown or Word
+- Downloadable reports
+
+---
+
+## 🔬 Technology Stack
+
+**AI Model:** OpenAI GPT-4o
+- JSON mode for structured extraction
+- 16K token context for comprehensive analysis
+- Temperature 0.1-0.2 for factual outputs
+
+**Frontend:** Streamlit
+- Interactive dashboard
+- Real-time visualizations
+- Session state management
+- File uploads
+
+**Visualization:** Plotly
+- Interactive charts
+- Waterfall diagrams
+- Funnel charts
+- Pie and bar charts
+
+**Document Processing:**
+- python-docx for Word reading/writing
+- PyPDF2 for PDF extraction
+- pandas for Excel analysis
+
+---
+
+## 📈 Performance Metrics
+
+**Analysis Speed:** 60-90 seconds per report
+**Cost per Report:** ~$0.10-0.15 (OpenAI API)
+**Accuracy:** Uses actual data from documents
+**Scalability:** Handles 50-70 lenders per report
+
+---
+
+## 🎯 Use Cases
+
+1. **Monthly Investor Reporting**
+   - Upload Excel, get comprehensive report
+   - Financial analysis with profit calculations
+   - Compliance assessment
+   - Risk analysis
+
+2. **Portfolio Monitoring**
+   - Real-time portfolio health tracking
+   - Lender concentration analysis
+   - Pipeline progression monitoring
+
+3. **Compliance Auditing**
+   - Automated FCA compliance checks
+   - Commission threshold validation
+   - Risk identification
+
+4. **Strategic Planning**
+   - Forecasting and projections
+   - ROI/MOIC tracking
+   - Action item identification
+
+---
+
+## 🔄 System Advantages
+
+### vs Manual Analysis
+- ⚡ 60-90 seconds vs 2-3 hours
+- 📊 Consistent format every time
+- 🎯 No human error in calculations
+- 📈 Interactive visualizations included
+
+### vs Simple Data Display
+- 🧠 Understands legal documents
+- 💡 Applies rules intelligently
+- 🔍 Validates compliance automatically
+- 📝 Generates insights, not just data
+
+### vs Traditional Reporting
+- 📄 Reads source documents (Priority Deed, FCA Scheme)
+- 🤖 4 specialized agents working together
+- 💰 Calculates profit splits accurately
+- ⚖️ Validates claims against regulations
+
+---
+
+## 🛠️ Maintenance
+
+**Documents to keep updated:**
+- Priority Deed (when terms change)
+- FCA Redress Scheme (when regulations update)
+- User credentials (in code or environment)
+
+**Monitoring:**
+- OpenAI API usage and costs
+- Dashboard performance
+- Agent output quality
+
+---
+
+## 📞 Support
+
+**System Info:**
+- Model: GPT-4o
+- Analysis Time: ~60-90 seconds
+- Version: 3.0 (Complete Multi-Agent Rebuild)
+
+---
+
+## 📜 License
+
+Proprietary - Internal use only
+
+---
+
+## 🎉 Summary
+
+A production-ready intelligent multi-agent system that:
+1. 📄 Reads legal documents to extract profit rules
+2. ⚖️ Validates claims against FCA regulations
+3. 📊 Extracts comprehensive data from Excel reports
+4. 📝 Generates professional investor reports
+5. 📈 Provides interactive visualizations
+6. 💾 Exports reports to Markdown/Word
+
+**Result:** Complete investor report in 60-90 seconds with factual analysis, compliance validation, and beautiful visualizations!
