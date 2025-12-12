@@ -104,11 +104,13 @@ else:
     # Display data if loaded
     if st.session_state.data:
         data = st.session_state.data
-        portfolio = data['portfolio_metrics']
-        lenders = data['lender_distribution']
-        costs = data['financial_costs']
-        pipeline = data['pipeline']
-        totals = data['portfolio_totals']
+
+        # Safely get data with defaults
+        portfolio = data.get('portfolio_metrics', {})
+        lenders = data.get('lender_distribution', [])
+        costs = data.get('financial_costs', {})
+        pipeline = data.get('pipeline', {})
+        totals = data.get('portfolio_totals', {'total_claims': 0, 'total_estimated_value': 0})
 
         # Get Priority Deed rules and calculate financials
         priority_deed = read_priority_deed_rules()
