@@ -529,6 +529,192 @@ IMPORTANT:
         # Keep it short (few lines)
         return " ".join(parts[:4])
 
+    def _format_as_markdown(self, report_data: Dict[str, Any]) -> str:
+        """Format the structured report as markdown (best-effort, safe for missing values)."""
+
+        def _num(v, default=None):
+            return v if isinstance(v, (int, float)) else default
+
+        def _int(v, default=0) -> int:
+            try:
+                return int(float(v))
+            except Exception:
+                return default
+
+        def _pct(v, default=None):
+            n = _num(v, default)
+            return "N/A" if n is None else f"{n:.1f}%"
+
+        def _x(v, default=None):
+            n = _num(v, default)
+            return "N/A" if n is None else f"{n:.2f}x"
+
+        def _gbp(v, default=None):
+            n = _num(v, default)
+            return "N/A" if n is None else f"£{n:,.2f}"
+
+        exec_sum = report_data.get("executive_summary") or {}
+        perf = report_data.get("portfolio_performance") or {}
+        fin = report_data.get("financial_analysis") or {}
+        comp = report_data.get("compliance_assessment") or {}
+        conc = report_data.get("lender_concentration") or {}
+        pipe = report_data.get("pipeline_analysis") or {}
+        cost = report_data.get("cost_efficiency") or {}
+        fcst = report_data.get("forecasting") or {}
+        risk = report_data.get("risk_assessment") or {}
+        action_items = report_data.get("action_items") or []
+
+        md = f"""# Monthly Investor Report
+## {exec_sum.get('reporting_period') or 'Reporting Period: N/A'}
+
+---
+
+## Executive Summary
+
+**Portfolio Health Score:** {exec_sum.get('portfolio_health_score') if exec_sum.get('portfolio_health_score') is not None else 'N/A'}/100
+
+### Key Metrics
+"""
+        for metric in (exec_sum.get('key_metrics_summary') or []):
+            md += f"- {metric}\n"
+
+        md += "\n### Critical Updates\n"
+        for update in (exec_sum.get('critical_updates') or []):
+            md += f"- {update}\n"
+
+        md += f"""
+
+---
+
+## Portfolio Performance
+
+- **Total Claims:** {_int(perf.get('total_claims')):,}
+- **Total Clients:** {_int(perf.get('total_clients')):,}
+- **Success Rate:** {_pct(perf.get('success_rate'))}
+- **Average Settlement:** {_gbp(perf.get('average_settlement'))}
+- **Total Portfolio Value:** {_gbp(perf.get('total_portfolio_value'))}
+
+{perf.get('month_over_month_growth') or ''}
+
+---
+
+## Financial Analysis
+
+### Revenue
+- **Total Expected Settlements:** {_gbp(fin.get('total_settlements'))}
+- **DBA Proceeds (30%):** {_gbp(fin.get('dba_proceeds_expected'))}
+
+### Costs & Returns
+- **Total Costs Incurred:** {_gbp(fin.get('total_costs_incurred'))}
+- **Net Proceeds:** {_gbp(fin.get('net_proceeds_after_costs'))}
+
+### Profit Distribution
+- **Funder Return:** {_gbp(fin.get('funder_expected_return'))}
+- **Firm Return:** {_gbp(fin.get('firm_expected_return'))}
+
+### Performance Metrics
+- **ROI Projection:** {_pct(fin.get('roi_projection'))}
+- **MOIC Projection:** {_x(fin.get('moic_projection'))}
+
+---
+
+## FCA Compliance Assessment
+
+**Status:** {(comp.get('fca_compliance_status') or 'N/A').upper()}
+
+{comp.get('commission_analysis') or ''}
+
+- **Claims at Risk:** {_int(comp.get('claims_at_risk'), default=0)}
+
+### Actions Required
+"""
+        for action in (comp.get('compliance_actions_needed') or []):
+            md += f"- {action}\n"
+
+        md += f"""
+
+---
+
+## Lender Concentration
+
+**Total Lenders:** {_int(conc.get('total_lenders'), default=0)}
+**Diversification Score:** {conc.get('diversification_score') if conc.get('diversification_score') is not None else 'N/A'}/100
+**Concentration Risk:** {conc.get('concentration_risk') or 'N/A'}
+
+### Top 5 Lenders
+"""
+        for lender in (conc.get('top_5_lenders') or []):
+            lender_name = (lender or {}).get('lender') or 'Unknown'
+            claims = _int((lender or {}).get('claims'), default=0)
+            pct = _num((lender or {}).get('percentage'), default=None)
+            pct_s = "N/A" if pct is None else f"{pct:.1f}%"
+            md += f"- **{lender_name}**: {claims} claims ({pct_s})\n"
+
+        md += f"""
+
+---
+
+## Pipeline Analysis
+
+{pipe.get('conversion_rates') or ''}
+
+**Pipeline Value:** {_gbp(pipe.get('pipeline_value'))}
+**Est. Time to Settlement:** {pipe.get('estimated_time_to_settlement') or 'N/A'}
+
+### Bottlenecks Identified
+"""
+        for bottleneck in (pipe.get('bottlenecks') or []):
+            md += f"- {bottleneck}\n"
+
+        md += f"""
+
+---
+
+## Cost Efficiency
+
+- **Cost per Claim:** {_gbp(cost.get('cost_per_claim'))}
+- **Cost per Successful Claim:** {_gbp(cost.get('cost_per_successful_claim'))}
+
+{cost.get('efficiency_trends') or ''}
+
+---
+
+## Forecasting
+
+{fcst.get('quarterly_outlook') or ''}
+
+**Expected Settlements (Next 90 Days):** {_gbp(fcst.get('expected_settlements_next_90_days'))}
+
+---
+
+## Risk Assessment
+
+**Overall Risk Level:** {(risk.get('risk_level') or 'N/A').upper()}
+
+### Key Risks
+"""
+        for r in (risk.get('key_risks') or []):
+            md += f"- {r}\n"
+
+        md += "\n### Mitigation Actions\n"
+        for m in (risk.get('mitigation_status') or []):
+            md += f"- {m}\n"
+
+        md += "\n---\n\n## Action Items\n\n"
+
+        for item in action_items:
+            item = item or {}
+            md += f"""
+### [{(item.get('priority') or 'N/A').upper()}] {item.get('action') or 'N/A'}
+- **Owner:** {item.get('owner') or 'N/A'}
+- **Deadline:** {item.get('deadline') or 'N/A'}
+- **Rationale:** {item.get('rationale') or 'N/A'}
+"""
+
+        md += "\n---\n\n*Report generated by AI Multi-Agent System*"
+
+        return md
+
 
 def _build_dashboard_figures(monthly_data: Dict[str, Any], report_data: Dict[str, Any]):
     """Create Plotly figures similar to the dashboard for embedding in the DOCX."""
