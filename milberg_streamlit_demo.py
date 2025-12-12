@@ -150,162 +150,167 @@ else:
         with tab1:
             st.header("Lender Distribution & Analysis")
 
-            # Sort lenders by number of claims
-            df_lenders = pd.DataFrame(lenders).sort_values('num_claims', ascending=False)
+            # Check if we have lender data
+            if not lenders or len(lenders) == 0:
+                st.warning("⚠️ No lender data found in the Excel file.")
+                st.info("Please make sure the uploaded file contains lender information in the expected format.")
+            else:
+                # Sort lenders by number of claims
+                df_lenders = pd.DataFrame(lenders).sort_values('num_claims', ascending=False)
 
-            col1, col2 = st.columns([1, 1])
-
-            with col1:
-                # Network graph (Instagram-style)
-                st.subheader("Lender Network Visualization")
-
-                # Create network graph
-                fig = go.Figure()
-
-                # Top 15 lenders for cleaner visualization
-                top_lenders = df_lenders.head(15)
-
-                # Calculate positions in a circle
-                import math
-                n = len(top_lenders)
-                angles = [2 * math.pi * i / n for i in range(n)]
-
-                # Add edges (lines from center to each lender)
-                for i, (idx, lender) in enumerate(top_lenders.iterrows()):
-                    x_pos = math.cos(angles[i]) * (lender['num_claims'] / df_lenders['num_claims'].max())
-                    y_pos = math.sin(angles[i]) * (lender['num_claims'] / df_lenders['num_claims'].max())
-
-                    # Line from center to lender
+                col1, col2 = st.columns([1, 1])
+    
+                with col1:
+                    # Network graph (Instagram-style)
+                    st.subheader("Lender Network Visualization")
+    
+                    # Create network graph
+                    fig = go.Figure()
+    
+                    # Top 15 lenders for cleaner visualization
+                    top_lenders = df_lenders.head(15)
+    
+                    # Calculate positions in a circle
+                    import math
+                    n = len(top_lenders)
+                    angles = [2 * math.pi * i / n for i in range(n)]
+    
+                    # Add edges (lines from center to each lender)
+                    for i, (idx, lender) in enumerate(top_lenders.iterrows()):
+                        x_pos = math.cos(angles[i]) * (lender['num_claims'] / df_lenders['num_claims'].max())
+                        y_pos = math.sin(angles[i]) * (lender['num_claims'] / df_lenders['num_claims'].max())
+    
+                        # Line from center to lender
+                        fig.add_trace(go.Scatter(
+                            x=[0, x_pos],
+                            y=[0, y_pos],
+                            mode='lines',
+                            line=dict(color='lightgray', width=1),
+                            showlegend=False,
+                            hoverinfo='skip'
+                        ))
+    
+                        # Lender node
+                        fig.add_trace(go.Scatter(
+                            x=[x_pos],
+                            y=[y_pos],
+                            mode='markers+text',
+                            marker=dict(
+                                size=lender['num_claims'] * 3,
+                                color=lender['num_claims'],
+                                colorscale='Viridis',
+                                showscale=False,
+                                line=dict(width=2, color='white')
+                            ),
+                            text=[lender['lender'][:20]],
+                            textposition='top center',
+                            textfont=dict(size=8),
+                            hovertemplate=f"<b>{lender['lender']}</b><br>" +
+                                        f"Claims: {lender['num_claims']}<br>" +
+                                        f"Value: £{lender['estimated_value']:,.0f}<br>" +
+                                        f"Share: {lender['pct_of_total']:.1f}%<extra></extra>",
+                            showlegend=False
+                        ))
+    
+                    # Center node
                     fig.add_trace(go.Scatter(
-                        x=[0, x_pos],
-                        y=[0, y_pos],
-                        mode='lines',
-                        line=dict(color='lightgray', width=1),
+                        x=[0],
+                        y=[0],
+                        mode='markers+text',
+                        marker=dict(size=30, color='red', symbol='star'),
+                        text=['Portfolio<br>180 Claims'],
+                        textposition='middle center',
+                        textfont=dict(size=10, color='white'),
                         showlegend=False,
                         hoverinfo='skip'
                     ))
-
-                    # Lender node
-                    fig.add_trace(go.Scatter(
-                        x=[x_pos],
-                        y=[y_pos],
-                        mode='markers+text',
-                        marker=dict(
-                            size=lender['num_claims'] * 3,
-                            color=lender['num_claims'],
-                            colorscale='Viridis',
-                            showscale=False,
-                            line=dict(width=2, color='white')
-                        ),
-                        text=[lender['lender'][:20]],
-                        textposition='top center',
-                        textfont=dict(size=8),
-                        hovertemplate=f"<b>{lender['lender']}</b><br>" +
-                                    f"Claims: {lender['num_claims']}<br>" +
-                                    f"Value: £{lender['estimated_value']:,.0f}<br>" +
-                                    f"Share: {lender['pct_of_total']:.1f}%<extra></extra>",
-                        showlegend=False
-                    ))
-
-                # Center node
-                fig.add_trace(go.Scatter(
-                    x=[0],
-                    y=[0],
-                    mode='markers+text',
-                    marker=dict(size=30, color='red', symbol='star'),
-                    text=['Portfolio<br>180 Claims'],
-                    textposition='middle center',
-                    textfont=dict(size=10, color='white'),
-                    showlegend=False,
-                    hoverinfo='skip'
-                ))
-
-                fig.update_layout(
-                    title="Top 15 Lenders - Network View",
-                    showlegend=False,
+    
+                    fig.update_layout(
+                        title="Top 15 Lenders - Network View",
+                        showlegend=False,
+                        height=600,
+                        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        paper_bgcolor='rgba(0,0,0,0)'
+                    )
+    
+                    st.plotly_chart(fig, use_container_width=True)
+    
+                with col2:
+                    # Top 10 Pie Chart
+                    st.subheader("Top 10 Lenders by Claims")
+    
+                    top10 = df_lenders.head(10)
+                    others_claims = df_lenders.iloc[10:]['num_claims'].sum()
+    
+                    if others_claims > 0:
+                        pie_data = pd.concat([
+                            top10[['lender', 'num_claims']],
+                            pd.DataFrame([{'lender': 'Others', 'num_claims': others_claims}])
+                        ])
+                    else:
+                        pie_data = top10[['lender', 'num_claims']]
+    
+                    fig_pie = px.pie(
+                        pie_data,
+                        values='num_claims',
+                        names='lender',
+                        hole=0.4
+                    )
+                    fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+                    fig_pie.update_layout(height=600, showlegend=True)
+    
+                    st.plotly_chart(fig_pie, use_container_width=True)
+    
+                # Lender Data Table
+                st.subheader("Complete Lender Data")
+    
+                # Format the dataframe
+                df_display = df_lenders.copy()
+                df_display['estimated_value'] = df_display['estimated_value'].apply(lambda x: f"£{x:,.2f}")
+                df_display['avg_claim_value'] = df_display['avg_claim_value'].apply(lambda x: f"£{x:,.2f}")
+                df_display['pct_of_total'] = df_display['pct_of_total'].apply(lambda x: f"{x:.1f}%")
+    
+                st.dataframe(
+                    df_display,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "lender": st.column_config.TextColumn("Lender", width="large"),
+                        "num_claims": st.column_config.NumberColumn("Claims", width="small"),
+                        "pct_of_total": st.column_config.TextColumn("% of Total", width="small"),
+                        "estimated_value": st.column_config.TextColumn("Est. Value", width="medium"),
+                        "avg_claim_value": st.column_config.TextColumn("Avg/Claim", width="medium")
+                    }
+                )
+    
+                # Top 15 Horizontal Bar Chart
+                st.subheader("Top 15 Lenders by Portfolio Value")
+    
+                top15_value = df_lenders.head(15).sort_values('estimated_value')
+    
+                fig_bar = px.bar(
+                    top15_value,
+                    x='estimated_value',
+                    y='lender',
+                    orientation='h',
+                    color='num_claims',
+                    color_continuous_scale='Blues',
+                    text=[f"£{v:,.0f}" for v in top15_value['estimated_value']]
+                )
+    
+                fig_bar.update_traces(textposition='outside')
+                fig_bar.update_layout(
                     height=600,
-                    xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                    plot_bgcolor='rgba(0,0,0,0)',
-                    paper_bgcolor='rgba(0,0,0,0)'
+                    xaxis_title="Portfolio Value (£)",
+                    yaxis_title="",
+                    yaxis={'categoryorder':'total ascending'},
+                    showlegend=False
                 )
-
-                st.plotly_chart(fig, use_container_width=True)
-
-            with col2:
-                # Top 10 Pie Chart
-                st.subheader("Top 10 Lenders by Claims")
-
-                top10 = df_lenders.head(10)
-                others_claims = df_lenders.iloc[10:]['num_claims'].sum()
-
-                if others_claims > 0:
-                    pie_data = pd.concat([
-                        top10[['lender', 'num_claims']],
-                        pd.DataFrame([{'lender': 'Others', 'num_claims': others_claims}])
-                    ])
-                else:
-                    pie_data = top10[['lender', 'num_claims']]
-
-                fig_pie = px.pie(
-                    pie_data,
-                    values='num_claims',
-                    names='lender',
-                    hole=0.4
-                )
-                fig_pie.update_traces(textposition='inside', textinfo='percent+label')
-                fig_pie.update_layout(height=600, showlegend=True)
-
-                st.plotly_chart(fig_pie, use_container_width=True)
-
-            # Lender Data Table
-            st.subheader("Complete Lender Data")
-
-            # Format the dataframe
-            df_display = df_lenders.copy()
-            df_display['estimated_value'] = df_display['estimated_value'].apply(lambda x: f"£{x:,.2f}")
-            df_display['avg_claim_value'] = df_display['avg_claim_value'].apply(lambda x: f"£{x:,.2f}")
-            df_display['pct_of_total'] = df_display['pct_of_total'].apply(lambda x: f"{x:.1f}%")
-
-            st.dataframe(
-                df_display,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "lender": st.column_config.TextColumn("Lender", width="large"),
-                    "num_claims": st.column_config.NumberColumn("Claims", width="small"),
-                    "pct_of_total": st.column_config.TextColumn("% of Total", width="small"),
-                    "estimated_value": st.column_config.TextColumn("Est. Value", width="medium"),
-                    "avg_claim_value": st.column_config.TextColumn("Avg/Claim", width="medium")
-                }
-            )
-
-            # Top 15 Horizontal Bar Chart
-            st.subheader("Top 15 Lenders by Portfolio Value")
-
-            top15_value = df_lenders.head(15).sort_values('estimated_value')
-
-            fig_bar = px.bar(
-                top15_value,
-                x='estimated_value',
-                y='lender',
-                orientation='h',
-                color='num_claims',
-                color_continuous_scale='Blues',
-                text=[f"£{v:,.0f}" for v in top15_value['estimated_value']]
-            )
-
-            fig_bar.update_traces(textposition='outside')
-            fig_bar.update_layout(
-                height=600,
-                xaxis_title="Portfolio Value (£)",
-                yaxis_title="",
-                yaxis={'categoryorder':'total ascending'},
-                showlegend=False
-            )
-
-            st.plotly_chart(fig_bar, use_container_width=True)
-
+    
+                st.plotly_chart(fig_bar, use_container_width=True)
+    
         # ==================== TAB 2: ECONOMIC ANALYSIS ====================
         with tab2:
             st.header("Economic Analysis & Profit Distribution")
@@ -538,11 +543,19 @@ else:
         with tab4:
             st.header("Comprehensive Portfolio Analysis")
 
-            # Concentration Analysis
-            st.subheader("Lender Concentration Risk")
+            # Check if we have lender data
+            if not lenders or len(lenders) == 0:
+                st.warning("⚠️ No lender data available for portfolio analysis.")
+            else:
+                # Sort lenders if not already done
+                if 'df_lenders' not in locals():
+                    df_lenders = pd.DataFrame(lenders).sort_values('num_claims', ascending=False)
 
-            # Calculate concentration
-            top5_claims = df_lenders.head(5)['num_claims'].sum()
+                # Concentration Analysis
+                st.subheader("Lender Concentration Risk")
+
+                # Calculate concentration
+                top5_claims = df_lenders.head(5)['num_claims'].sum()
             top10_claims = df_lenders.head(10)['num_claims'].sum()
             concentration_top5 = (top5_claims / totals['total_claims']) * 100
             concentration_top10 = (top10_claims / totals['total_claims']) * 100
