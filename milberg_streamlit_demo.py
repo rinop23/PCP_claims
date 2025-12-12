@@ -80,6 +80,10 @@ if 'investor_report_md' not in st.session_state:
     st.session_state.investor_report_md = None
 if 'investor_report_path' not in st.session_state:
     st.session_state.investor_report_path = None
+if 'investor_report_docx_bytes' not in st.session_state:
+    st.session_state.investor_report_docx_bytes = None
+if 'investor_report_docx_path' not in st.session_state:
+    st.session_state.investor_report_docx_path = None
 if 'last_uploaded_excel_path' not in st.session_state:
     st.session_state.last_uploaded_excel_path = None
 
@@ -194,12 +198,12 @@ else:
             generate_clicked = st.button("🧠 Generate Investor Report", type="primary")
 
         with col_r2:
-            if st.session_state.investor_report_md:
+            if st.session_state.investor_report_docx_bytes:
                 st.download_button(
-                    label="⬇️ Download Report (Markdown)",
-                    data=st.session_state.investor_report_md.encode("utf-8"),
-                    file_name=os.path.basename(st.session_state.investor_report_path or "monthly_investor_report.md"),
-                    mime="text/markdown",
+                    label="⬇️ Download Report (Word)",
+                    data=st.session_state.investor_report_docx_bytes,
+                    file_name=os.path.basename(st.session_state.investor_report_docx_path or "monthly_investor_report.docx"),
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     use_container_width=True,
                 )
             else:
@@ -217,39 +221,47 @@ else:
             elif not st.session_state.last_uploaded_excel_path or not os.path.exists(st.session_state.last_uploaded_excel_path):
                 st.error("No uploaded Excel detected. Please upload and load a Monthly Report first.")
             else:
-                try:
-                    with st.spinner("Generating investor report with OpenAI agents..."):
-                        result = generate_full_investor_report(st.session_state.last_uploaded_excel_path)
-                        md = result.get("markdown_report")
-                        if not md:
-                            raise ValueError("Agent did not return markdown_report")
+                # Check API key early for clearer UX
+                api_key = os.environ.get("OPENAI_API_KEY")
+                if not api_key:
+                    try:
+                        api_key = st.secrets.get("OPENAI_API_KEY")
+                    except Exception:
+                        api_key = None
+                if not api_key:
+                    st.error("OPENAI_API_KEY is not set. Add it as an environment variable or to Streamlit secrets.")
+                else:
+                    try:
+                        with st.spinner("Generating investor report with OpenAI agents..."):
+                            result = generate_full_investor_report(st.session_state.last_uploaded_excel_path)
 
-                        # Persist in session
-                        st.session_state.investor_report_md = md
+                            # Keep markdown preview if returned
+                            st.session_state.investor_report_md = result.get("markdown_report")
 
-                        # Write to disk for retention
-                        os.makedirs("reports", exist_ok=True)
-                        period = (
-                            (result.get("monthly_data") or {}).get("reporting_period")
-                            or datetime.now().strftime("%Y-%m")
+                            # Prefer DOCX report from agent system
+                            docx_path = result.get("docx_report_path")
+                            if not docx_path or not os.path.exists(docx_path):
+                                raise ValueError("Agent did not produce a DOCX report (docx_report_path missing)")
+
+                            with open(docx_path, "rb") as f:
+                                st.session_state.investor_report_docx_bytes = f.read()
+                            st.session_state.investor_report_docx_path = docx_path
+
+                            # Persist path for compatibility
+                            st.session_state.investor_report_path = docx_path
+
+                        st.success("Investor report generated.")
+
+                        if st.session_state.investor_report_md:
+                            with st.expander("Preview report (markdown)"):
+                                st.markdown(st.session_state.investor_report_md)
+
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to generate investor report: {e}")
+                        st.info(
+                            "If charts are missing, install 'kaleido'. If this is an API key issue, set `OPENAI_API_KEY` as an environment variable or in Streamlit secrets."
                         )
-                        safe_period = str(period).replace("/", "-").replace("\\", "-").replace(":", "-")
-                        out_path = os.path.join("reports", f"Investor_Report_{safe_period}.md")
-                        with open(out_path, "w", encoding="utf-8") as f:
-                            f.write(md)
-                        st.session_state.investor_report_path = out_path
-
-                    st.success("Investor report generated.")
-
-                    with st.expander("Preview report"):
-                        st.markdown(st.session_state.investor_report_md)
-
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Failed to generate investor report: {e}")
-                    st.info(
-                        "If this is an API key issue, set `OPENAI_API_KEY` as an environment variable or in Streamlit secrets."
-                    )
 
         st.markdown("---")
 

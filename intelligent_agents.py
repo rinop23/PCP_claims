@@ -9,6 +9,7 @@ from typing import Dict, Any, List, Tuple
 from openai import OpenAI
 import pandas as pd
 from docx import Document
+from docx.shared import Inches
 import PyPDF2
 
 
@@ -492,198 +493,174 @@ IMPORTANT:
         # Generate markdown version for display
         markdown_report = self._format_as_markdown(report_data)
 
+        # Generate a short narrative (few lines) to accompany charts in the DOCX
+        narrative = self._generate_short_narrative(report_data)
+
         print("✅ Investor report generated successfully")
 
         return {
             "report_data": report_data,
-            "markdown_report": markdown_report
+            "markdown_report": markdown_report,
+            "narrative": narrative,
         }
 
-    def _format_as_markdown(self, report_data: Dict[str, Any]) -> str:
-        """Format the structured report as markdown"""
-
-        def _num(v, default=None):
-            return v if isinstance(v, (int, float)) else default
-
-        def _int(v, default=0) -> int:
-            try:
-                return int(float(v))
-            except Exception:
-                return default
-
-        def _pct(v, default=None):
-            n = _num(v, default)
-            return "N/A" if n is None else f"{n:.1f}%"
-
-        def _x(v, default=None):
-            n = _num(v, default)
-            return "N/A" if n is None else f"{n:.2f}x"
-
-        def _gbp(v, default=None):
-            n = _num(v, default)
-            return "N/A" if n is None else f"£{n:,.2f}"
-
+    def _generate_short_narrative(self, report_data: Dict[str, Any]) -> str:
+        """Generate brief narrative lines to explain the data (kept short and factual)."""
         exec_sum = report_data.get("executive_summary") or {}
         perf = report_data.get("portfolio_performance") or {}
         fin = report_data.get("financial_analysis") or {}
-        comp = report_data.get("compliance_assessment") or {}
-        conc = report_data.get("lender_concentration") or {}
-        pipe = report_data.get("pipeline_analysis") or {}
-        cost = report_data.get("cost_efficiency") or {}
-        fcst = report_data.get("forecasting") or {}
-        risk = report_data.get("risk_assessment") or {}
-        action_items = report_data.get("action_items") or []
 
-        md = f"""# Monthly Investor Report
-## {exec_sum.get('reporting_period') or 'Reporting Period: N/A'}
+        period = exec_sum.get("reporting_period") or "the reporting period"
+        claims = perf.get("total_claims")
+        clients = perf.get("total_clients")
+        value = perf.get("total_portfolio_value")
+        roi = fin.get("roi_projection")
 
----
+        parts = [
+            f"This report summarizes portfolio activity for {period}.",
+        ]
+        if claims is not None and clients is not None:
+            parts.append(f"The portfolio contains {claims} claims across {clients} clients.")
+        if value is not None:
+            parts.append(f"Estimated total portfolio value is £{value:,.0f}.")
+        if roi is not None:
+            parts.append(f"Projected ROI based on current inputs is {roi:.1f}%.")
 
-## Executive Summary
+        # Keep it short (few lines)
+        return " ".join(parts[:4])
 
-**Portfolio Health Score:** {exec_sum.get('portfolio_health_score') if exec_sum.get('portfolio_health_score') is not None else 'N/A'}/100
 
-### Key Metrics
-"""
-        for metric in (exec_sum.get('key_metrics_summary') or []):
-            md += f"- {metric}\n"
+def _build_dashboard_figures(monthly_data: Dict[str, Any], report_data: Dict[str, Any]):
+    """Create Plotly figures similar to the dashboard for embedding in the DOCX."""
+    try:
+        import plotly.express as px
+        import plotly.graph_objects as go
+    except Exception:
+        return {}
 
-        md += "\n### Critical Updates\n"
-        for update in (exec_sum.get('critical_updates') or []):
-            md += f"- {update}\n"
+    figs = {}
 
-        md += f"""
+    # Lender Top 10 by claims
+    lenders = (monthly_data or {}).get("lender_distribution") or []
+    if lenders:
+        df_l = pd.DataFrame(lenders).sort_values("num_claims", ascending=False)
+        top10 = df_l.head(10)
+        others_claims = df_l.iloc[10:]["num_claims"].sum() if len(df_l) > 10 else 0
+        if others_claims > 0:
+            pie_df = pd.concat(
+                [top10[["lender", "num_claims"]], pd.DataFrame([{ "lender": "Others", "num_claims": others_claims }])]
+            )
+        else:
+            pie_df = top10[["lender", "num_claims"]]
 
----
+        fig_pie = px.pie(pie_df, values="num_claims", names="lender", hole=0.4)
+        fig_pie.update_traces(textposition="inside", textinfo="percent+label")
+        fig_pie.update_layout(title="Top 10 Lenders by Claims")
+        figs["lenders_pie"] = fig_pie
 
-## Portfolio Performance
+        # Top 15 lenders by value (bar)
+        if "estimated_value" in df_l.columns:
+            top15_val = df_l.head(15).sort_values("estimated_value")
+            fig_bar = px.bar(
+                top15_val,
+                x="estimated_value",
+                y="lender",
+                orientation="h",
+                color="num_claims" if "num_claims" in top15_val.columns else None,
+                title="Top 15 Lenders by Portfolio Value",
+            )
+            figs["lenders_value_bar"] = fig_bar
 
-- **Total Claims:** {_int(perf.get('total_claims')):,}
-- **Total Clients:** {_int(perf.get('total_clients')):,}
-- **Success Rate:** {_pct(perf.get('success_rate'))}
-- **Average Settlement:** {_gbp(perf.get('average_settlement'))}
-- **Total Portfolio Value:** {_gbp(perf.get('total_portfolio_value'))}
+    # Pipeline funnel by count
+    pipeline = (monthly_data or {}).get("pipeline") or {}
+    stage_order = [
+        ("Awaiting DSAR", "awaiting_dsar"),
+        ("Pending Submission", "pending_submission"),
+        ("Under Review", "under_review"),
+        ("Settlement Offered", "settlement_offered"),
+        ("Paid", "paid"),
+    ]
+    try:
+        pipe_rows = []
+        for label, key in stage_order:
+            d = pipeline.get(key) or {}
+            pipe_rows.append({"Stage": label, "Count": d.get("count", 0), "Value": d.get("value", 0)})
+        df_p = pd.DataFrame(pipe_rows)
+        fig_funnel = go.Figure(go.Funnel(y=df_p["Stage"], x=df_p["Count"], textinfo="value+percent initial"))
+        fig_funnel.update_layout(title="Pipeline Funnel (by Count)")
+        figs["pipeline_funnel"] = fig_funnel
 
-{perf.get('month_over_month_growth') or ''}
+        fig_pipe_val = px.bar(df_p, x="Stage", y="Value", title="Pipeline Value by Stage")
+        figs["pipeline_value"] = fig_pipe_val
+    except Exception:
+        pass
 
----
+    return figs
 
-## Financial Analysis
 
-### Revenue
-- **Total Expected Settlements:** {_gbp(fin.get('total_settlements'))}
-- **DBA Proceeds (30%):** {_gbp(fin.get('dba_proceeds_expected'))}
+def _export_plotly_fig_to_png_bytes(fig) -> bytes:
+    """Export a Plotly figure to PNG bytes (requires kaleido)."""
+    try:
+        import plotly.io as pio
+        return pio.to_image(fig, format="png", width=1200, height=700, scale=2)
+    except Exception:
+        return b""
 
-### Costs & Returns
-- **Total Costs Incurred:** {_gbp(fin.get('total_costs_incurred'))}
-- **Net Proceeds:** {_gbp(fin.get('net_proceeds_after_costs'))}
 
-### Profit Distribution
-- **Funder Return:** {_gbp(fin.get('funder_expected_return'))}
-- **Firm Return:** {_gbp(fin.get('firm_expected_return'))}
+def build_investor_report_docx(
+    *,
+    out_path: str,
+    narrative: str,
+    monthly_data: Dict[str, Any],
+    investor_report: Dict[str, Any],
+) -> str:
+    """Create a .docx investor report including brief narrative and dashboard charts."""
 
-### Performance Metrics
-- **ROI Projection:** {_pct(fin.get('roi_projection'))}
-- **MOIC Projection:** {_x(fin.get('moic_projection'))}
+    doc = Document()
+    doc.add_heading("Monthly Investor Report", level=0)
 
----
+    period = ((investor_report or {}).get("executive_summary") or {}).get("reporting_period")
+    if period:
+        doc.add_paragraph(str(period))
 
-## FCA Compliance Assessment
+    if narrative:
+        doc.add_paragraph(narrative)
 
-**Status:** {(comp.get('fca_compliance_status') or 'N/A').upper()}
+    doc.add_heading("Key Charts", level=1)
 
-{comp.get('commission_analysis') or ''}
+    figs = _build_dashboard_figures(monthly_data, investor_report)
 
-- **Claims at Risk:** {_int(comp.get('claims_at_risk'), default=0)}
+    # Write images to temp files (python-docx needs file paths)
+    tmp_dir = os.path.join(os.path.dirname(out_path), ".tmp_report_assets")
+    os.makedirs(tmp_dir, exist_ok=True)
 
-### Actions Required
-"""
-        for action in (comp.get('compliance_actions_needed') or []):
-            md += f"- {action}\n"
+    added_any = False
+    for key, fig in figs.items():
+        png = _export_plotly_fig_to_png_bytes(fig)
+        if not png:
+            continue
+        img_path = os.path.join(tmp_dir, f"{key}.png")
+        with open(img_path, "wb") as f:
+            f.write(png)
+        doc.add_paragraph(key.replace("_", " ").title())
+        doc.add_picture(img_path, width=Inches(6.5))
+        added_any = True
 
-        md += f"""
+    if not added_any:
+        doc.add_paragraph("Charts could not be embedded (PNG export requires the 'kaleido' package).")
 
----
+    # Also include the action items (brief)
+    doc.add_heading("Action Items", level=1)
+    for item in ((investor_report or {}).get("action_items") or []):
+        item = item or {}
+        doc.add_paragraph(
+            f"[{(item.get('priority') or 'N/A').upper()}] {item.get('action') or 'N/A'}  "
+            f"Owner: {item.get('owner') or 'N/A'}  Deadline: {item.get('deadline') or 'N/A'}",
+            style=None,
+        )
 
-## Lender Concentration
-
-**Total Lenders:** {_int(conc.get('total_lenders'), default=0)}
-**Diversification Score:** {conc.get('diversification_score') if conc.get('diversification_score') is not None else 'N/A'}/100
-**Concentration Risk:** {conc.get('concentration_risk') or 'N/A'}
-
-### Top 5 Lenders
-"""
-        for lender in (conc.get('top_5_lenders') or []):
-            lender_name = (lender or {}).get('lender') or 'Unknown'
-            claims = _int((lender or {}).get('claims'), default=0)
-            pct = _num((lender or {}).get('percentage'), default=None)
-            pct_s = "N/A" if pct is None else f"{pct:.1f}%"
-            md += f"- **{lender_name}**: {claims} claims ({pct_s})\n"
-
-        md += f"""
-
----
-
-## Pipeline Analysis
-
-{pipe.get('conversion_rates') or ''}
-
-**Pipeline Value:** {_gbp(pipe.get('pipeline_value'))}
-**Est. Time to Settlement:** {pipe.get('estimated_time_to_settlement') or 'N/A'}
-
-### Bottlenecks Identified
-"""
-        for bottleneck in (pipe.get('bottlenecks') or []):
-            md += f"- {bottleneck}\n"
-
-        md += f"""
-
----
-
-## Cost Efficiency
-
-- **Cost per Claim:** {_gbp(cost.get('cost_per_claim'))}
-- **Cost per Successful Claim:** {_gbp(cost.get('cost_per_successful_claim'))}
-
-{cost.get('efficiency_trends') or ''}
-
----
-
-## Forecasting
-
-{fcst.get('quarterly_outlook') or ''}
-
-**Expected Settlements (Next 90 Days):** {_gbp(fcst.get('expected_settlements_next_90_days'))}
-
----
-
-## Risk Assessment
-
-**Overall Risk Level:** {(risk.get('risk_level') or 'N/A').upper()}
-
-### Key Risks
-"""
-        for r in (risk.get('key_risks') or []):
-            md += f"- {r}\n"
-
-        md += "\n### Mitigation Actions\n"
-        for m in (risk.get('mitigation_status') or []):
-            md += f"- {m}\n"
-
-        md += "\n---\n\n## Action Items\n\n"
-
-        for item in action_items:
-            item = item or {}
-            md += f"""
-### [{(item.get('priority') or 'N/A').upper()}] {item.get('action') or 'N/A'}
-- **Owner:** {item.get('owner') or 'N/A'}
-- **Deadline:** {item.get('deadline') or 'N/A'}
-- **Rationale:** {item.get('rationale') or 'N/A'}
-"""
-
-        md += "\n---\n\n*Report generated by AI Multi-Agent System*"
-
-        return md
+    doc.save(out_path)
+    return out_path
 
 
 def generate_full_investor_report(excel_path: str) -> Dict[str, Any]:
@@ -716,6 +693,23 @@ def generate_full_investor_report(excel_path: str) -> Dict[str, Any]:
         compliance_rules=compliance_rules
     )
 
+    # Build DOCX report on disk
+    os.makedirs("reports", exist_ok=True)
+    period = (monthly_data or {}).get("reporting_period") or "Report"
+    safe_period = str(period).replace("/", "-").replace("\\", "-").replace(":", "-")
+    docx_path = os.path.join("reports", f"Investor_Report_{safe_period}.docx")
+    try:
+        build_investor_report_docx(
+            out_path=docx_path,
+            narrative=report.get("narrative") or "",
+            monthly_data=monthly_data,
+            investor_report=report.get("report_data") or {},
+        )
+    except Exception as e:
+        # Keep generation robust; downstream UI can show charts warning
+        print(f"Warning: DOCX report generation failed: {e}")
+        docx_path = None
+
     print("="*80)
     print("✅ REPORT GENERATION COMPLETE")
     print("="*80)
@@ -725,7 +719,8 @@ def generate_full_investor_report(excel_path: str) -> Dict[str, Any]:
         "profit_rules": profit_rules,
         "compliance_rules": compliance_rules,
         "investor_report": report["report_data"],
-        "markdown_report": report["markdown_report"]
+        "markdown_report": report["markdown_report"],
+        "docx_report_path": docx_path,
     }
 
 
