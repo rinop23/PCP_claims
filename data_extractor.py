@@ -46,14 +46,15 @@ def extract_monthly_report_data(file_path: str) -> Dict[str, Any]:
     # Read Excel file with no header
     df = pd.read_excel(file_path, sheet_name='Monthly Summary', header=None)
 
-    # Initialize data structure
+    # Initialize data structure with all keys
     data = {
         'reporting_period': 'Monthly Report',
         'portfolio_metrics': {},
         'lender_distribution': [],
         'financial_costs': {},
         'pipeline': {},
-        'forecasting': {}
+        'forecasting': {},
+        'portfolio_totals': {'total_claims': 0, 'total_estimated_value': 0}
     }
 
     # Extract Portfolio Overview (rows 8-14)
