@@ -789,7 +789,8 @@ def _export_plotly_fig_to_png_bytes(fig) -> bytes:
     try:
         import plotly.io as pio
         return pio.to_image(fig, format="png", width=1200, height=700, scale=2)
-    except Exception:
+    except Exception as e:
+        # Return empty bytes but keep the root cause available to the caller
         return b""
 
 
@@ -802,6 +803,17 @@ def build_investor_report_docx(
 ) -> str:
     """Create a .docx investor report including brief narrative and dashboard charts."""
 
+    def _add_kv_table(title: str, rows: List[Tuple[str, str]]):
+        doc.add_heading(title, level=1)
+        table = doc.add_table(rows=1, cols=2)
+        hdr = table.rows[0].cells
+        hdr[0].text = "Metric"
+        hdr[1].text = "Value"
+        for k, v in rows:
+            row_cells = table.add_row().cells
+            row_cells[0].text = str(k)
+            row_cells[1].text = str(v)
+
     doc = Document()
     doc.add_heading("Monthly Investor Report", level=0)
 
@@ -812,6 +824,23 @@ def build_investor_report_docx(
     if narrative:
         doc.add_paragraph(narrative)
 
+    # Add a compact metrics section (so the DOCX is useful even without charts)
+    perf = (investor_report or {}).get("portfolio_performance") or {}
+    fin = (investor_report or {}).get("financial_analysis") or {}
+    _add_kv_table(
+        "Key Metrics",
+        [
+            ("Total Claims", perf.get("total_claims", "N/A")),
+            ("Total Clients", perf.get("total_clients", "N/A")),
+            ("Total Portfolio Value", perf.get("total_portfolio_value", "N/A")),
+            ("Total Expected Settlements", fin.get("total_settlements", "N/A")),
+            ("DBA Proceeds Expected", fin.get("dba_proceeds_expected", "N/A")),
+            ("Total Costs Incurred", fin.get("total_costs_incurred", "N/A")),
+            ("Funder Expected Return", fin.get("funder_expected_return", "N/A")),
+            ("Firm Expected Return", fin.get("firm_expected_return", "N/A")),
+        ],
+    )
+
     doc.add_heading("Key Charts", level=1)
 
     figs = _build_dashboard_figures(monthly_data, investor_report)
@@ -821,28 +850,42 @@ def build_investor_report_docx(
     os.makedirs(tmp_dir, exist_ok=True)
 
     added_any = False
+    export_failures: List[str] = []
+
     for key, fig in figs.items():
-        png = _export_plotly_fig_to_png_bytes(fig)
-        if not png:
-            continue
-        img_path = os.path.join(tmp_dir, f"{key}.png")
-        with open(img_path, "wb") as f:
-            f.write(png)
-        doc.add_paragraph(key.replace("_", " ").title())
-        doc.add_picture(img_path, width=Inches(6.5))
-        added_any = True
+        try:
+            png = _export_plotly_fig_to_png_bytes(fig)
+            if not png:
+                raise RuntimeError("Empty PNG bytes returned by plotly.io.to_image")
+
+            img_path = os.path.join(tmp_dir, f"{key}.png")
+            with open(img_path, "wb") as f:
+                f.write(png)
+
+            doc.add_paragraph(key.replace("_", " ").title())
+            doc.add_picture(img_path, width=Inches(6.5))
+            added_any = True
+        except Exception as e:
+            export_failures.append(f"{key}: {e}")
 
     if not added_any:
-        doc.add_paragraph("Charts could not be embedded (PNG export requires the 'kaleido' package).")
+        doc.add_paragraph(
+            "Charts could not be embedded. This usually means Plotly image export failed in this environment. "
+            "Ensure 'kaleido' is installed and available to the same Python environment running Streamlit."
+        )
+        if export_failures:
+            # Put the real reasons inside the DOCX for debugging
+            doc.add_paragraph("Export errors:")
+            for err in export_failures[:10]:
+                doc.add_paragraph(f"- {err}")
 
     # Also include the action items (brief)
     doc.add_heading("Action Items", level=1)
     for item in ((investor_report or {}).get("action_items") or []):
         item = item or {}
         doc.add_paragraph(
-            f"[{(item.get('priority') or 'N/A').upper()}] {item.get('action') or 'N/A'}  "
-            f"Owner: {item.get('owner') or 'N/A'}  Deadline: {item.get('deadline') or 'N/A'}",
-            style=None,
+            f"[{(item.get('priority') or 'N/A').upper()}] {item.get('action') or 'N/A'} | "
+            f"Owner: {item.get('owner') or 'N/A'} | Deadline: {item.get('deadline') or 'N/A'}"
         )
 
     doc.save(out_path)
