@@ -785,13 +785,68 @@ def _build_dashboard_figures(monthly_data: Dict[str, Any], report_data: Dict[str
 
 
 def _export_plotly_fig_to_png_bytes(fig) -> bytes:
-    """Export a Plotly figure to PNG bytes (requires kaleido)."""
+    """Export a Plotly figure to PNG bytes (requires kaleido).
+
+    Note: This is kept for backward compatibility. Prefer `_export_plotly_fig_to_png_bytes_with_error`
+    for better diagnostics.
+    """
+    png, _err = _export_plotly_fig_to_png_bytes_with_error(fig)
+    return png
+
+
+def _export_plotly_fig_to_png_bytes_with_error(fig) -> Tuple[bytes, Exception | None]:
+    """Export a Plotly figure to PNG bytes (requires kaleido), returning (bytes, error).
+
+    In some environments `plotly.io.to_image` can return empty bytes when Kaleido isn't usable.
+    We force a full figure build and provide actionable diagnostics.
+    """
     try:
         import plotly.io as pio
-        return pio.to_image(fig, format="png", width=1200, height=700, scale=2)
+
+        # Force full computation/layout prior to export
+        try:
+            fig = fig.full_figure_for_development(warn=False)
+        except Exception:
+            # Not all figure types/environments support this; proceed without it.
+            pass
+
+        b = pio.to_image(fig, format="png", width=1200, height=700, scale=2)
+        if not b:
+            raise RuntimeError("plotly.io.to_image returned empty bytes")
+        return b, None
     except Exception as e:
-        # Return empty bytes but keep the root cause available to the caller
-        return b""
+        return b"", e
+
+
+def _kaleido_debug_info() -> str:
+    """Return debug info string about Kaleido/Plotly image export availability."""
+    try:
+        import importlib
+        import plotly
+
+        parts = [f"plotly={getattr(plotly, '__version__', 'unknown')}"]
+
+        try:
+            k = importlib.import_module("kaleido")
+            parts.append(f"kaleido={getattr(k, '__version__', 'unknown')}")
+        except Exception as e:
+            parts.append(f"kaleido_import_error={type(e).__name__}: {e}")
+
+        # Optional: try creating a tiny image to verify export works
+        try:
+            import pandas as pd
+            import plotly.express as px
+            import plotly.io as pio
+
+            fig = px.bar(pd.DataFrame({"x": [1, 2], "y": [3, 4]}), x="x", y="y")
+            b = pio.to_image(fig, format="png", width=10, height=10, scale=1)
+            parts.append(f"to_image_ok={bool(b)}")
+        except Exception as e:
+            parts.append(f"to_image_error={type(e).__name__}: {e}")
+
+        return "; ".join(parts)
+    except Exception as e:
+        return f"kaleido_debug_failed={type(e).__name__}: {e}"
 
 
 def build_investor_report_docx(
@@ -843,6 +898,9 @@ def build_investor_report_docx(
 
     doc.add_heading("Key Charts", level=1)
 
+    # Record environment diagnostic info inside the DOCX to make failures actionable
+    doc.add_paragraph(f"Chart export environment: {_kaleido_debug_info()}")
+
     figs = _build_dashboard_figures(monthly_data, investor_report)
 
     # Write images to temp files (python-docx needs file paths)
@@ -854,8 +912,11 @@ def build_investor_report_docx(
 
     for key, fig in figs.items():
         try:
-            png = _export_plotly_fig_to_png_bytes(fig)
+            png, err = _export_plotly_fig_to_png_bytes_with_error(fig)
             if not png:
+                # Provide the real root cause
+                if err is not None:
+                    raise err
                 raise RuntimeError("Empty PNG bytes returned by plotly.io.to_image")
 
             img_path = os.path.join(tmp_dir, f"{key}.png")
@@ -866,7 +927,7 @@ def build_investor_report_docx(
             doc.add_picture(img_path, width=Inches(6.5))
             added_any = True
         except Exception as e:
-            export_failures.append(f"{key}: {e}")
+            export_failures.append(f"{key}: {type(e).__name__}: {e}")
 
     if not added_any:
         doc.add_paragraph(

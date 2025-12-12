@@ -216,13 +216,27 @@ else:
                 "Requires `OPENAI_API_KEY` env var or Streamlit secret."
             )
             with st.expander("Report generation environment"):
-                st.code(f"python: {sys.executable}\nplatform: {sys.platform}")
+                import os as _os
+                st.code(
+                    "\n".join(
+                        [
+                            f"python: {sys.executable}",
+                            f"platform: {sys.platform}",
+                            f"cwd: {_os.getcwd()}",
+                            f"OPENAI_API_KEY set: {bool(_os.environ.get('OPENAI_API_KEY'))}",
+                        ]
+                    )
+                )
                 try:
-                    import kaleido  # noqa: F401
                     import kaleido as _k
                     st.success(f"kaleido available: {getattr(_k, '__version__', 'unknown')}")
                 except Exception as e:
-                    st.error(f"kaleido NOT available: {e}")
+                    st.error(f"kaleido NOT available: {type(e).__name__}: {e}")
+                try:
+                    import plotly as _plotly
+                    st.caption(f"plotly version: {getattr(_plotly, '__version__', 'unknown')}")
+                except Exception as e:
+                    st.caption(f"plotly version: unknown ({type(e).__name__}: {e})")
 
         if generate_clicked:
             if generate_full_investor_report is None:
