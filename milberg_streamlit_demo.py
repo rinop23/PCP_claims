@@ -436,15 +436,23 @@ else:
                 # Cost Breakdown
                 st.subheader("Cost Breakdown")
 
-                cost_data = pd.DataFrame({
-                    'Category': ['Acquisition', 'Submission', 'Processing', 'Legal'],
-                    'Amount': [
-                        costs['acquisition_cost_cumulative'],
-                        costs['submission_cost_cumulative'],
-                        costs['processing_cost'],
-                        costs['legal_cost']
-                    ]
-                })
+                # Check if cost data is available
+                if not costs or 'acquisition_cost_cumulative' not in costs:
+                    st.warning("⚠️ Financial cost data not available in the Excel file.")
+                    cost_data = pd.DataFrame({
+                        'Category': ['Acquisition', 'Submission', 'Processing', 'Legal'],
+                        'Amount': [0, 0, 0, 0]
+                    })
+                else:
+                    cost_data = pd.DataFrame({
+                        'Category': ['Acquisition', 'Submission', 'Processing', 'Legal'],
+                        'Amount': [
+                            costs.get('acquisition_cost_cumulative', 0),
+                            costs.get('submission_cost_cumulative', 0),
+                            costs.get('processing_cost', 0),
+                            costs.get('legal_cost', 0)
+                        ]
+                    })
 
                 fig_costs = px.bar(
                     cost_data,
