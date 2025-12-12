@@ -1,0 +1,4 @@
+# System packages for Streamlit Community Cloud
+# Needed for Plotly/Kaleido static image export
+chromium
+chromium-driver
