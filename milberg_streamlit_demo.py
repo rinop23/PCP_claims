@@ -564,124 +564,124 @@ else:
 
                 # Calculate concentration
                 top5_claims = df_lenders.head(5)['num_claims'].sum()
-            top10_claims = df_lenders.head(10)['num_claims'].sum()
-            concentration_top5 = (top5_claims / totals['total_claims']) * 100
-            concentration_top10 = (top10_claims / totals['total_claims']) * 100
+                top10_claims = df_lenders.head(10)['num_claims'].sum()
+                concentration_top5 = (top5_claims / totals['total_claims']) * 100
+                concentration_top10 = (top10_claims / totals['total_claims']) * 100
 
-            col1, col2, col3 = st.columns(3)
+                col1, col2, col3 = st.columns(3)
 
-            with col1:
-                st.metric("Top 5 Concentration", f"{concentration_top5:.1f}%")
-                st.caption(f"{top5_claims} claims out of {totals['total_claims']}")
+                with col1:
+                    st.metric("Top 5 Concentration", f"{concentration_top5:.1f}%")
+                    st.caption(f"{top5_claims} claims out of {totals['total_claims']}")
 
-            with col2:
-                st.metric("Top 10 Concentration", f"{concentration_top10:.1f}%")
-                st.caption(f"{top10_claims} claims out of {totals['total_claims']}")
+                with col2:
+                    st.metric("Top 10 Concentration", f"{concentration_top10:.1f}%")
+                    st.caption(f"{top10_claims} claims out of {totals['total_claims']}")
 
-            with col3:
-                diversification_score = 100 - concentration_top5
-                st.metric("Diversification Score", f"{diversification_score:.1f}/100")
-                st.caption("Higher is better")
+                with col3:
+                    diversification_score = 100 - concentration_top5
+                    st.metric("Diversification Score", f"{diversification_score:.1f}/100")
+                    st.caption("Higher is better")
 
-            # Concentration risk indicator
-            if concentration_top5 > 50:
-                st.warning("⚠️ High Concentration Risk: Top 5 lenders represent >50% of portfolio")
-            elif concentration_top5 > 30:
-                st.info("ℹ️ Moderate Concentration: Top 5 lenders represent 30-50% of portfolio")
-            else:
-                st.success("✅ Low Concentration: Well-diversified portfolio")
+                # Concentration risk indicator
+                if concentration_top5 > 50:
+                    st.warning("⚠️ High Concentration Risk: Top 5 lenders represent >50% of portfolio")
+                elif concentration_top5 > 30:
+                    st.info("ℹ️ Moderate Concentration: Top 5 lenders represent 30-50% of portfolio")
+                else:
+                    st.success("✅ Low Concentration: Well-diversified portfolio")
 
-            st.markdown("---")
+                st.markdown("---")
 
-            # Claims Distribution
-            col1, col2 = st.columns([1, 1])
+                # Claims Distribution
+                col1, col2 = st.columns([1, 1])
 
-            with col1:
-                st.subheader("Claims Distribution by Lender Size")
+                with col1:
+                    st.subheader("Claims Distribution by Lender Size")
 
-                # Categorize lenders
-                df_lenders['Category'] = pd.cut(
-                    df_lenders['num_claims'],
-                    bins=[0, 2, 5, 10, 999],
-                    labels=['Small (1-2)', 'Medium (3-5)', 'Large (6-10)', 'Very Large (10+)']
-                )
+                    # Categorize lenders
+                    df_lenders['Category'] = pd.cut(
+                        df_lenders['num_claims'],
+                        bins=[0, 2, 5, 10, 999],
+                        labels=['Small (1-2)', 'Medium (3-5)', 'Large (6-10)', 'Very Large (10+)']
+                    )
 
-                category_dist = df_lenders.groupby('Category', observed=False).agg({
-                    'num_claims': 'sum',
-                    'lender': 'count'
-                }).reset_index()
-                category_dist.columns = ['Category', 'Total Claims', 'Number of Lenders']
+                    category_dist = df_lenders.groupby('Category', observed=False).agg({
+                        'num_claims': 'sum',
+                        'lender': 'count'
+                    }).reset_index()
+                    category_dist.columns = ['Category', 'Total Claims', 'Number of Lenders']
 
-                fig_cat = px.bar(
-                    category_dist,
-                    x='Category',
-                    y='Total Claims',
-                    text='Total Claims',
-                    color='Number of Lenders',
-                    color_continuous_scale='Viridis'
-                )
+                    fig_cat = px.bar(
+                        category_dist,
+                        x='Category',
+                        y='Total Claims',
+                        text='Total Claims',
+                        color='Number of Lenders',
+                        color_continuous_scale='Viridis'
+                    )
 
-                fig_cat.update_traces(textposition='outside')
-                fig_cat.update_layout(height=400)
+                    fig_cat.update_traces(textposition='outside')
+                    fig_cat.update_layout(height=400)
 
-                st.plotly_chart(fig_cat, use_container_width=True)
+                    st.plotly_chart(fig_cat, use_container_width=True)
 
-            with col2:
-                st.subheader("Value Distribution")
+                with col2:
+                    st.subheader("Value Distribution")
 
-                # Value ranges
-                df_lenders['Value_Category'] = pd.cut(
-                    df_lenders['estimated_value'],
-                    bins=[0, 2000, 5000, 10000, 999999],
-                    labels=['<£2K', '£2-5K', '£5-10K', '>£10K']
-                )
+                    # Value ranges
+                    df_lenders['Value_Category'] = pd.cut(
+                        df_lenders['estimated_value'],
+                        bins=[0, 2000, 5000, 10000, 999999],
+                        labels=['<£2K', '£2-5K', '£5-10K', '>£10K']
+                    )
 
-                value_dist = df_lenders.groupby('Value_Category', observed=False).agg({
-                    'estimated_value': 'sum',
-                    'lender': 'count'
-                }).reset_index()
-                value_dist.columns = ['Value Range', 'Total Value', 'Count']
+                    value_dist = df_lenders.groupby('Value_Category', observed=False).agg({
+                        'estimated_value': 'sum',
+                        'lender': 'count'
+                    }).reset_index()
+                    value_dist.columns = ['Value Range', 'Total Value', 'Count']
 
-                fig_val = px.pie(
-                    value_dist,
-                    values='Total Value',
-                    names='Value Range',
-                    hole=0.4
-                )
+                    fig_val = px.pie(
+                        value_dist,
+                        values='Total Value',
+                        names='Value Range',
+                        hole=0.4
+                    )
 
-                fig_val.update_layout(height=400)
+                    fig_val.update_layout(height=400)
 
-                st.plotly_chart(fig_val, use_container_width=True)
+                    st.plotly_chart(fig_val, use_container_width=True)
 
-            st.markdown("---")
+                st.markdown("---")
 
-            # Summary Statistics
-            st.subheader("Portfolio Statistics Summary")
+                # Summary Statistics
+                st.subheader("Portfolio Statistics Summary")
 
-            stats_df = pd.DataFrame({
-                'Metric': [
-                    'Total Lenders',
-                    'Total Claims',
-                    'Total Portfolio Value',
-                    'Average Claims per Lender',
-                    'Average Value per Lender',
-                    'Largest Lender (by claims)',
-                    'Largest Lender (by value)',
-                    'Smallest Active Lender'
-                ],
-                'Value': [
-                    f"{len(lenders)}",
-                    f"{totals['total_claims']}",
-                    f"£{totals['total_estimated_value']:,.2f}",
-                    f"{totals['total_claims'] / len(lenders):.1f}",
-                    f"£{totals['total_estimated_value'] / len(lenders):,.2f}",
-                    f"{df_lenders.iloc[0]['lender']} ({df_lenders.iloc[0]['num_claims']} claims)",
-                    f"{df_lenders.sort_values('estimated_value', ascending=False).iloc[0]['lender']} (£{df_lenders.sort_values('estimated_value', ascending=False).iloc[0]['estimated_value']:,.2f})",
-                    f"{df_lenders.iloc[-1]['lender']} ({df_lenders.iloc[-1]['num_claims']} claims)"
-                ]
-            })
+                stats_df = pd.DataFrame({
+                    'Metric': [
+                        'Total Lenders',
+                        'Total Claims',
+                        'Total Portfolio Value',
+                        'Average Claims per Lender',
+                        'Average Value per Lender',
+                        'Largest Lender (by claims)',
+                        'Largest Lender (by value)',
+                        'Smallest Active Lender'
+                    ],
+                    'Value': [
+                        f"{len(lenders)}",
+                        f"{totals['total_claims']}",
+                        f"£{totals['total_estimated_value']:,.2f}",
+                        f"{totals['total_claims'] / len(lenders):.1f}",
+                        f"£{totals['total_estimated_value'] / len(lenders):,.2f}",
+                        f"{df_lenders.iloc[0]['lender']} ({df_lenders.iloc[0]['num_claims']} claims)",
+                        f"{df_lenders.sort_values('estimated_value', ascending=False).iloc[0]['lender']} (£{df_lenders.sort_values('estimated_value', ascending=False).iloc[0]['estimated_value']:,.2f})",
+                        f"{df_lenders.iloc[-1]['lender']} ({df_lenders.iloc[-1]['num_claims']} claims)"
+                    ]
+                })
 
-            st.dataframe(stats_df, use_container_width=True, hide_index=True)
+                st.dataframe(stats_df, use_container_width=True, hide_index=True)
 
     else:
         st.info("👆 Please upload a Milberg Monthly Report Excel file to view the dashboard")
