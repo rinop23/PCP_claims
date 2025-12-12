@@ -66,6 +66,8 @@ if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 if 'data' not in st.session_state:
     st.session_state.data = None
+if 'debug_output' not in st.session_state:
+    st.session_state.debug_output = None
 
 # Login page
 if not st.session_state.logged_in:
@@ -130,6 +132,11 @@ else:
     # Display data if loaded
     if st.session_state.data:
         data = st.session_state.data
+
+        # Show debug output if available
+        if 'debug_output' in st.session_state and st.session_state.debug_output:
+            with st.expander("🔍 Debug Information (click to view)"):
+                st.code(st.session_state.debug_output)
 
         # Safely get data with defaults
         portfolio = data.get('portfolio_metrics', {})
