@@ -43,8 +43,17 @@ def clean_percentage(value) -> float:
 def extract_monthly_report_data(file_path: str) -> Dict[str, Any]:
     """Extract all actual data from Milberg Monthly Report Excel"""
 
+    # Debug: Print file path and check if file exists
+    print(f"DEBUG: Attempting to read file: {file_path}")
+    import os
+    print(f"DEBUG: File exists: {os.path.exists(file_path)}")
+
     # Read Excel file with no header
     df = pd.read_excel(file_path, sheet_name='Monthly Summary', header=None)
+
+    # Debug: Print DataFrame info
+    print(f"DEBUG: DataFrame shape: {df.shape}")
+    print(f"DEBUG: First few rows:\n{df.head(10)}")
 
     # Initialize data structure with all keys
     data = {
@@ -105,12 +114,18 @@ def extract_monthly_report_data(file_path: str) -> Dict[str, Any]:
     # Column 0: Lender name, Column 1: No. Claims, Column 2: % of Total, Column 3: Est. Value
     lenders = []
 
+    print(f"DEBUG: Starting lender extraction from rows 27-87")
+
     for i in range(27, 88):  # Rows with lender data
         try:
             lender_name = df.iloc[i, 0]
 
+            if i == 27:  # Debug first lender row
+                print(f"DEBUG: Row 27 data: {df.iloc[i, :5].to_dict()}")
+
             # Skip if it's "Grand Summary" or empty
             if pd.isna(lender_name) or 'Grand Summary' in str(lender_name):
+                print(f"DEBUG: Breaking at row {i}: lender_name={lender_name}")
                 break
 
             num_claims = int(df.iloc[i, 1]) if not pd.isna(df.iloc[i, 1]) else 0
@@ -126,8 +141,10 @@ def extract_monthly_report_data(file_path: str) -> Dict[str, Any]:
                     'avg_claim_value': est_value / num_claims if num_claims > 0 else 0
                 })
         except Exception as e:
+            print(f"DEBUG: Error at row {i}: {e}")
             continue
 
+    print(f"DEBUG: Extracted {len(lenders)} lenders")
     data['lender_distribution'] = lenders
 
     # Extract Grand Summary totals (row 87)

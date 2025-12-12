@@ -97,9 +97,35 @@ else:
 
         if st.button("📊 Load Data", type="primary"):
             with st.spinner("Loading data from Excel..."):
-                st.session_state.data = extract_monthly_report_data(temp_path)
-                st.success("Data loaded successfully!")
-                st.rerun()
+                import sys
+                from io import StringIO
+
+                # Capture print output for debugging
+                old_stdout = sys.stdout
+                sys.stdout = captured_output = StringIO()
+
+                try:
+                    st.session_state.data = extract_monthly_report_data(temp_path)
+
+                    # Get captured debug output
+                    debug_output = captured_output.getvalue()
+                    sys.stdout = old_stdout
+
+                    # Store debug output in session state
+                    st.session_state.debug_output = debug_output
+
+                    st.success("Data loaded successfully!")
+
+                    # Show debug info in expander
+                    if debug_output:
+                        with st.expander("🔍 Debug Information (for troubleshooting)"):
+                            st.code(debug_output)
+
+                    st.rerun()
+                except Exception as e:
+                    sys.stdout = old_stdout
+                    st.error(f"Error loading data: {e}")
+                    st.exception(e)
 
     # Display data if loaded
     if st.session_state.data:
