@@ -9,3 +9,11 @@ openpyxl>=3.1.0
 
 # AI Analysis
 openai>=1.0.0
+
+# Visualization
+plotly>=5.17.0
+matplotlib>=3.5.0
+
+# Document Processing
+python-docx>=1.0.0
+PyPDF2>=3.0.0
