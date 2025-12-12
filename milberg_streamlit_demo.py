@@ -138,6 +138,23 @@ else:
             with st.expander("🔍 Debug Information (click to view)"):
                 st.code(st.session_state.debug_output)
 
+                # Check for common errors in debug output
+                if "ERROR:" in st.session_state.debug_output:
+                    st.error("⚠️ **File Format Error Detected**")
+                    if "only" in st.session_state.debug_output and "rows" in st.session_state.debug_output:
+                        st.warning("""
+                        **The uploaded Excel file appears to be incomplete or in a different format.**
+
+                        **Expected format:**
+                        - File should have 100+ rows
+                        - Sheet name: "Monthly Summary"
+                        - Lender data starting at row 27
+                        - Grand totals at row 87
+
+                        **Please ensure you're uploading the complete Milberg Monthly Report Excel file.**
+                        """)
+                        st.info("💡 **Tip:** Check that you're uploading the file named 'Milberg_MOnthly_Report.xlsx' with the full dataset.")
+
         # Safely get data with defaults
         portfolio = data.get('portfolio_metrics', {})
         lenders = data.get('lender_distribution', [])

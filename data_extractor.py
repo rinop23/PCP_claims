@@ -55,6 +55,12 @@ def extract_monthly_report_data(file_path: str) -> Dict[str, Any]:
     print(f"DEBUG: DataFrame shape: {df.shape}")
     print(f"DEBUG: First few rows:\n{df.head(10)}")
 
+    # Validate file format
+    if df.shape[0] < 88:
+        print(f"ERROR: Excel file has only {df.shape[0]} rows, but needs at least 88 rows for lender data.")
+        print("ERROR: Please upload the correct 'Milberg Monthly Report' Excel file with the full data.")
+        print("ERROR: Expected format: 114+ rows with 'Monthly Summary' sheet containing lender distribution starting at row 27")
+
     # Initialize data structure with all keys
     data = {
         'reporting_period': 'Monthly Report',
