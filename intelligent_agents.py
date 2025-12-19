@@ -1104,82 +1104,320 @@ def build_investor_report_docx(
     monthly_data: Dict[str, Any],
     investor_report: Dict[str, Any],
 ) -> str:
-    """Create a .docx investor report including brief narrative and dashboard charts."""
+    """Create a .docx investor report including all dashboard data, tables, and charts."""
 
-    def _add_kv_table(title: str, rows: List[Tuple[str, str]]):
-        doc.add_heading(title, level=1)
-        table = doc.add_table(rows=1, cols=2)
-        hdr = table.rows[0].cells
-        hdr[0].text = "Metric"
-        hdr[1].text = "Value"
-        for k, v in rows:
+    def _fmt_currency(v):
+        """Format value as currency"""
+        if v is None or v == "N/A":
+            return "N/A"
+        try:
+            return f"£{float(v):,.2f}"
+        except (ValueError, TypeError):
+            return str(v)
+
+    def _fmt_pct(v):
+        """Format value as percentage"""
+        if v is None or v == "N/A":
+            return "N/A"
+        try:
+            return f"{float(v):.1f}%"
+        except (ValueError, TypeError):
+            return str(v)
+
+    def _fmt_num(v):
+        """Format value as number with commas"""
+        if v is None or v == "N/A":
+            return "N/A"
+        try:
+            return f"{int(float(v)):,}"
+        except (ValueError, TypeError):
+            return str(v)
+
+    def _add_table(headers: List[str], rows: List[List[str]], style: str = None):
+        """Add a table with headers and rows"""
+        table = doc.add_table(rows=1, cols=len(headers))
+        if style:
+            table.style = style
+        # Header row
+        hdr_cells = table.rows[0].cells
+        for i, header in enumerate(headers):
+            hdr_cells[i].text = str(header)
+        # Data rows
+        for row_data in rows:
             row_cells = table.add_row().cells
-            row_cells[0].text = str(k)
-            row_cells[1].text = str(v)
+            for i, cell_val in enumerate(row_data):
+                row_cells[i].text = str(cell_val) if cell_val is not None else "N/A"
 
     doc = Document()
     doc.add_heading("Monthly Investor Report", level=0)
 
-    period = ((investor_report or {}).get("executive_summary") or {}).get("reporting_period")
-    if period:
-        doc.add_paragraph(str(period))
-
-    if narrative:
-        doc.add_heading("Executive Summary", level=1)
-        doc.add_paragraph(narrative)
-
-    # ==================== Mirror the dashboard sections ====================
+    # Get report data
+    exec_sum = (investor_report or {}).get("executive_summary") or {}
     perf = (investor_report or {}).get("portfolio_performance") or {}
     fin = (investor_report or {}).get("financial_analysis") or {}
     comp = (investor_report or {}).get("compliance_assessment") or {}
     risk = (investor_report or {}).get("risk_assessment") or {}
+    lender_conc = (investor_report or {}).get("lender_concentration") or {}
+    pipeline_analysis = (investor_report or {}).get("pipeline_analysis") or {}
+    cost_eff = (investor_report or {}).get("cost_efficiency") or {}
+    fcst = (investor_report or {}).get("forecasting") or {}
 
-    # High-level metrics (kept near the top)
-    _add_kv_table(
-        "Key Metrics",
+    # Get raw monthly data
+    lenders = (monthly_data or {}).get("lender_distribution") or []
+    pipeline = (monthly_data or {}).get("pipeline") or {}
+    pm = (monthly_data or {}).get("portfolio_metrics") or {}
+    fm = (monthly_data or {}).get("financial_metrics") or {}
+
+    period = exec_sum.get("reporting_period") or "Monthly Report"
+    doc.add_paragraph(f"Reporting Period: {period}")
+    doc.add_paragraph("")
+
+    # ==================== EXECUTIVE SUMMARY ====================
+    doc.add_heading("Executive Summary", level=1)
+
+    if narrative:
+        doc.add_paragraph(narrative)
+        doc.add_paragraph("")
+
+    # Key highlights
+    if exec_sum.get("key_metrics_summary"):
+        doc.add_heading("Key Highlights", level=2)
+        for metric in exec_sum.get("key_metrics_summary", []):
+            doc.add_paragraph(f"• {metric}")
+
+    if exec_sum.get("critical_updates"):
+        doc.add_heading("Critical Updates", level=2)
+        for update in exec_sum.get("critical_updates", []):
+            doc.add_paragraph(f"• {update}")
+
+    doc.add_paragraph("")
+
+    # ==================== 1. LENDERS SECTION ====================
+    doc.add_heading("1. Lenders Distribution", level=1)
+
+    # Lender summary metrics
+    doc.add_heading("Lender Summary", level=2)
+    _add_table(
+        ["Metric", "Value"],
         [
-            ("Total Claims", perf.get("total_claims", "N/A")),
-            ("Total Clients", perf.get("total_clients", "N/A")),
-            ("Total Portfolio Value", perf.get("total_portfolio_value", "N/A")),
-            ("Success Rate", perf.get("success_rate", "N/A")),
-            ("Total Expected Settlements", fin.get("total_settlements", "N/A")),
-            ("DBA Proceeds Expected", fin.get("dba_proceeds_expected", "N/A")),
-            ("Total Costs Incurred", fin.get("total_costs_incurred", "N/A")),
-            ("Funder Expected Return (80% of DBA)", fin.get("funder_expected_return", "N/A")),
-            ("Firm Expected Return (20% of DBA)", fin.get("firm_expected_return", "N/A")),
-            ("ROI Projection", fin.get("roi_projection", "N/A")),
-            ("MOIC Projection", fin.get("moic_projection", "N/A")),
-        ],
+            ["Total Lenders", _fmt_num(lender_conc.get("total_lenders") or len(lenders))],
+            ["Diversification Score", f"{lender_conc.get('diversification_score', 'N/A')}/100" if lender_conc.get('diversification_score') else "N/A"],
+            ["Concentration Risk", lender_conc.get("concentration_risk", "N/A")],
+        ]
+    )
+    doc.add_paragraph("")
+
+    # Top lenders table
+    if lender_conc.get("top_5_lenders"):
+        doc.add_heading("Top 5 Lenders by Claims", level=2)
+        top_lender_rows = []
+        for lender in lender_conc.get("top_5_lenders", []):
+            top_lender_rows.append([
+                lender.get("lender", "Unknown"),
+                _fmt_num(lender.get("claims", 0)),
+                _fmt_pct(lender.get("percentage", 0))
+            ])
+        _add_table(["Lender", "Claims", "% of Total"], top_lender_rows)
+        doc.add_paragraph("")
+
+    # Full lender distribution table (all lenders from monthly data)
+    if lenders:
+        doc.add_heading("Complete Lender Distribution", level=2)
+        doc.add_paragraph(f"Total of {len(lenders)} lenders in portfolio:")
+
+        # Sort by claims descending
+        sorted_lenders = sorted(lenders, key=lambda x: x.get('num_claims', 0), reverse=True)
+
+        lender_rows = []
+        for lender in sorted_lenders:
+            lender_rows.append([
+                lender.get("lender", "Unknown"),
+                _fmt_num(lender.get("num_claims", 0)),
+                _fmt_pct(lender.get("pct_of_total", 0) * 100 if lender.get("pct_of_total", 0) < 1 else lender.get("pct_of_total", 0)),
+                _fmt_currency(lender.get("estimated_value", 0)),
+                _fmt_currency(lender.get("avg_claim_value", 0))
+            ])
+
+        _add_table(
+            ["Lender (Defendant)", "Claims", "% of Total", "Estimated Value", "Avg Claim Value"],
+            lender_rows
+        )
+        doc.add_paragraph("")
+
+    # ==================== 2. ECONOMIC ANALYSIS SECTION ====================
+    doc.add_heading("2. Economic Analysis", level=1)
+
+    # Financial Summary Table
+    doc.add_heading("Financial Summary", level=2)
+    _add_table(
+        ["Metric", "Value"],
+        [
+            ["Total Settlement Value", _fmt_currency(fin.get("total_settlements"))],
+            ["DBA Proceeds (30%)", _fmt_currency(fin.get("dba_proceeds_expected"))],
+            ["Total Costs Incurred", _fmt_currency(fin.get("total_costs_incurred"))],
+            ["Funder Return (80% of DBA)", _fmt_currency(fin.get("funder_expected_return"))],
+            ["Firm Return (20% of DBA)", _fmt_currency(fin.get("firm_expected_return"))],
+            ["ROI Projection", _fmt_pct(fin.get("roi_projection"))],
+            ["MOIC Projection", f"{fin.get('moic_projection', 0):.2f}x" if fin.get('moic_projection') else "N/A"],
+        ]
+    )
+    doc.add_paragraph("")
+
+    # Cost Breakdown
+    doc.add_heading("Cost Breakdown", level=2)
+    cost_rows = [
+        ["Acquisition Cost", _fmt_currency(fm.get("acquisition_cost", 0))],
+        ["Submission Cost", _fmt_currency(fm.get("submission_cost", 0))],
+        ["Processing Cost", _fmt_currency(fm.get("processing_cost", 0))],
+        ["Legal Cost", _fmt_currency(fm.get("legal_cost", 0))],
+        ["Total Costs", _fmt_currency(fm.get("total_costs", 0))],
+        ["Cost per Claim", _fmt_currency(cost_eff.get("cost_per_claim") or fm.get("cost_per_claim", 0))],
+        ["Cost per Successful Claim", _fmt_currency(cost_eff.get("cost_per_successful_claim", 0))],
+    ]
+    _add_table(["Cost Category", "Amount"], cost_rows)
+    doc.add_paragraph("")
+
+    # Profit Distribution explanation
+    doc.add_heading("Profit Distribution (Priority Deed Terms)", level=2)
+    doc.add_paragraph("• DBA Rate: 30% of settlements")
+    doc.add_paragraph("• Split: 80/20 (Funder/Milberg) on GROSS DBA proceeds")
+    doc.add_paragraph("• Costs paid separately by Funder")
+    doc.add_paragraph("")
+
+    if cost_eff.get("efficiency_trends"):
+        doc.add_paragraph(f"Efficiency Trends: {cost_eff.get('efficiency_trends')}")
+        doc.add_paragraph("")
+
+    # ==================== 3. COMPLIANCE & PIPELINE SECTION ====================
+    doc.add_heading("3. Compliance & Pipeline", level=1)
+
+    # FCA Compliance Assessment
+    doc.add_heading("FCA Compliance Assessment", level=2)
+    _add_table(
+        ["Metric", "Value"],
+        [
+            ["Compliance Status", (comp.get("fca_compliance_status") or "N/A").upper()],
+            ["Claims at Risk", _fmt_num(comp.get("claims_at_risk", 0))],
+        ]
+    )
+    doc.add_paragraph("")
+
+    if comp.get("commission_analysis"):
+        doc.add_paragraph(f"Commission Analysis: {comp.get('commission_analysis')}")
+        doc.add_paragraph("")
+
+    if comp.get("compliance_actions_needed"):
+        doc.add_heading("Compliance Actions Required", level=3)
+        for action in comp.get("compliance_actions_needed", []):
+            doc.add_paragraph(f"• {action}")
+        doc.add_paragraph("")
+
+    # Pipeline Breakdown
+    doc.add_heading("Claims Pipeline Breakdown", level=2)
+
+    # Pipeline stages table
+    pipeline_stages = [
+        ("Awaiting DSAR Response", pipeline.get("awaiting_dsar", {})),
+        ("Pending Submission", pipeline.get("pending_submission", {})),
+        ("Under Review", pipeline.get("under_review", {})),
+        ("Settlement Offered", pipeline.get("settlement_offered", {})),
+        ("Paid", pipeline.get("paid", {})),
+    ]
+
+    pipeline_rows = []
+    total_pipeline_count = 0
+    total_pipeline_value = 0
+    for stage_name, stage_data in pipeline_stages:
+        count = stage_data.get("count", 0) if isinstance(stage_data, dict) else 0
+        value = stage_data.get("value", 0) if isinstance(stage_data, dict) else 0
+        total_pipeline_count += count
+        total_pipeline_value += value
+        pipeline_rows.append([stage_name, _fmt_num(count), _fmt_currency(value)])
+
+    pipeline_rows.append(["TOTAL", _fmt_num(total_pipeline_count), _fmt_currency(total_pipeline_value)])
+
+    _add_table(["Pipeline Stage", "Count", "Value"], pipeline_rows)
+    doc.add_paragraph("")
+
+    # Pipeline analysis
+    if pipeline_analysis.get("conversion_rates"):
+        doc.add_paragraph(f"Conversion Rates: {pipeline_analysis.get('conversion_rates')}")
+    if pipeline_analysis.get("estimated_time_to_settlement"):
+        doc.add_paragraph(f"Estimated Time to Settlement: {pipeline_analysis.get('estimated_time_to_settlement')}")
+
+    if pipeline_analysis.get("bottlenecks"):
+        doc.add_heading("Pipeline Bottlenecks Identified", level=3)
+        for bottleneck in pipeline_analysis.get("bottlenecks", []):
+            doc.add_paragraph(f"• {bottleneck}")
+    doc.add_paragraph("")
+
+    # ==================== 4. PORTFOLIO ANALYSIS SECTION ====================
+    doc.add_heading("4. Portfolio Analysis", level=1)
+
+    # Portfolio Metrics
+    doc.add_heading("Portfolio Metrics", level=2)
+    _add_table(
+        ["Metric", "Value"],
+        [
+            ["Total Claims", _fmt_num(perf.get("total_claims") or pm.get("unique_claims", 0))],
+            ["Total Clients", _fmt_num(perf.get("total_clients") or pm.get("unique_clients", 0))],
+            ["Total Lenders", _fmt_num(len(lenders))],
+            ["Total Portfolio Value", _fmt_currency(perf.get("total_portfolio_value") or pm.get("total_settlement_value", 0))],
+            ["Claims Submitted", _fmt_num(pm.get("claims_submitted", 0))],
+            ["Claims Successful", _fmt_num(pm.get("claims_successful", 0))],
+            ["Claims Rejected", _fmt_num(pm.get("claims_rejected", 0))],
+            ["Average Claim Value", _fmt_currency(perf.get("average_settlement") or pm.get("avg_claim_value", 0))],
+            ["Success Rate", _fmt_pct(perf.get("success_rate") or pm.get("success_rate", 0))],
+        ]
+    )
+    doc.add_paragraph("")
+
+    if perf.get("month_over_month_growth"):
+        doc.add_paragraph(f"Month-over-Month Growth: {perf.get('month_over_month_growth')}")
+        doc.add_paragraph("")
+
+    # Risk Assessment
+    doc.add_heading("Risk Assessment", level=2)
+    doc.add_paragraph(f"Overall Risk Level: {(risk.get('risk_level') or 'N/A').upper()}")
+
+    if risk.get("key_risks"):
+        doc.add_heading("Key Risks", level=3)
+        for r in risk.get("key_risks", []):
+            doc.add_paragraph(f"• {r}")
+
+    if risk.get("mitigation_status"):
+        doc.add_heading("Mitigation Actions", level=3)
+        for m in risk.get("mitigation_status", []):
+            doc.add_paragraph(f"• {m}")
+    doc.add_paragraph("")
+
+    # Forecasting
+    doc.add_heading("Forecasting & Projections", level=2)
+
+    forecast_data = (monthly_data or {}).get("forecasting") or {}
+    _add_table(
+        ["Projection", "Value"],
+        [
+            ["Expected New Clients", _fmt_num(forecast_data.get("expected_new_clients", 0))],
+            ["Expected Submissions", _fmt_num(forecast_data.get("expected_submissions", 0))],
+            ["Expected Settlement Value (90 days)", _fmt_currency(fcst.get("expected_settlements_next_90_days", 0))],
+        ]
     )
 
-    # Charts: group under the same conceptual headings as dashboard
+    if fcst.get("quarterly_outlook"):
+        doc.add_paragraph("")
+        doc.add_paragraph(f"Quarterly Outlook: {fcst.get('quarterly_outlook')}")
+    doc.add_paragraph("")
+
+    # ==================== CHARTS SECTION ====================
+    doc.add_heading("5. Charts & Visualizations", level=1)
+
+    # Build figures
     figs = _build_dashboard_figures(monthly_data, investor_report)
 
-    doc.add_heading("Lenders", level=1)
-    doc.add_paragraph("Key lender distribution charts (as shown on the dashboard).")
-
-    doc.add_heading("Economic Analysis", level=1)
-    doc.add_paragraph("Summary of expected economics and distribution.")
-
-    doc.add_heading("Compliance & Pipeline", level=1)
-    doc.add_paragraph(f"FCA compliance status: {(comp.get('fca_compliance_status') or 'N/A').upper()}")
-
-    # Optional: brief risk section to mirror dashboard narrative
-    doc.add_heading("Portfolio Analysis", level=1)
-    if risk.get("risk_level"):
-        doc.add_paragraph(f"Overall risk level: {risk.get('risk_level')}")
-
-    # Record environment diagnostic info inside the DOCX (keep this for support)
-    doc.add_heading("Charts", level=1)
-    doc.add_paragraph(f"Chart export environment: {_kaleido_debug_info()}")
-
-    # Write images to temp files (python-docx needs file paths)
+    # Write images to temp files
     tmp_dir = os.path.join(os.path.dirname(out_path), ".tmp_report_assets")
     os.makedirs(tmp_dir, exist_ok=True)
-
-    # Helper to add a chart if present
-    def _add_chart(key: str, caption: str):
-        nonlocal_export_failures = None  # placeholder for linting
 
     added_any = False
     export_failures: List[str] = []
@@ -1202,19 +1440,23 @@ def build_investor_report_docx(
 
             doc.add_paragraph(caption)
             doc.add_picture(img_path, width=Inches(6.5))
+            doc.add_paragraph("")
             added_any = True
         except Exception as e:
             export_failures.append(f"{key}: {type(e).__name__}: {e}")
 
-    # Lenders
+    # Lenders charts
+    doc.add_heading("Lender Distribution Charts", level=2)
     _add_chart("lenders_pie", "Top 10 Lenders by Claims")
     _add_chart("lenders_value_bar", "Top 15 Lenders by Portfolio Value")
 
-    # Economic
+    # Economic charts
+    doc.add_heading("Economic Analysis Charts", level=2)
     _add_chart("economic_summary", "Economic Summary (Expected)")
     _add_chart("profit_split", "Expected Profit Distribution")
 
-    # Pipeline
+    # Pipeline charts
+    doc.add_heading("Pipeline Charts", level=2)
     _add_chart("pipeline_funnel", "Pipeline Funnel (by Count)")
     _add_chart("pipeline_value", "Pipeline Value by Stage")
 
@@ -1228,24 +1470,34 @@ def build_investor_report_docx(
             for err in export_failures[:10]:
                 doc.add_paragraph(f"- {err}")
 
-    # Compliance details (text)
-    if comp:
-        doc.add_heading("Compliance Notes", level=2)
-        if comp.get("commission_analysis"):
-            doc.add_paragraph(str(comp.get("commission_analysis")))
-        if comp.get("compliance_actions_needed"):
-            doc.add_paragraph("Actions required:")
-            for a in (comp.get("compliance_actions_needed") or []):
-                doc.add_paragraph(f"- {a}")
+    # ==================== ACTION ITEMS ====================
+    doc.add_heading("6. Action Items", level=1)
 
-    # Action items
-    doc.add_heading("Action Items", level=1)
-    for item in ((investor_report or {}).get("action_items") or []):
-        item = item or {}
-        doc.add_paragraph(
-            f"[{(item.get('priority') or 'N/A').upper()}] {item.get('action') or 'N/A'} | "
-            f"Owner: {item.get('owner') or 'N/A'} | Deadline: {item.get('deadline') or 'N/A'}"
+    action_items = (investor_report or {}).get("action_items") or []
+    if action_items:
+        action_rows = []
+        for item in action_items:
+            item = item or {}
+            action_rows.append([
+                (item.get('priority') or 'N/A').upper(),
+                item.get('action', 'N/A'),
+                item.get('owner', 'N/A'),
+                item.get('deadline', 'N/A'),
+                item.get('rationale', 'N/A')
+            ])
+        _add_table(
+            ["Priority", "Action", "Owner", "Deadline", "Rationale"],
+            action_rows
         )
+    else:
+        doc.add_paragraph("No action items identified.")
+
+    doc.add_paragraph("")
+
+    # Footer
+    doc.add_paragraph("---")
+    doc.add_paragraph("Report generated by AI Multi-Agent System")
+    doc.add_paragraph(f"Chart export environment: {_kaleido_debug_info()}")
 
     doc.save(out_path)
     return out_path
