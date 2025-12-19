@@ -12,17 +12,26 @@ import os
 import hashlib
 from datetime import datetime
 
+# Check if python-pptx is available (for diagnostics)
+try:
+    from pptx import Presentation as _TestPptx
+    PPTX_INSTALLED = True
+except ImportError:
+    PPTX_INSTALLED = False
+
 # Import the unified intelligent agent system
 try:
     from intelligent_agents import (
         generate_full_investor_report,
         MonthlyReportAgent,
-        PriorityDeedAgent
+        PriorityDeedAgent,
+        PPTX_AVAILABLE
     )
     AGENTS_AVAILABLE = True
 except Exception as e:
     print(f"Warning: Could not import intelligent_agents: {e}")
     AGENTS_AVAILABLE = False
+    PPTX_AVAILABLE = False
     generate_full_investor_report = None
     MonthlyReportAgent = None
     PriorityDeedAgent = None
@@ -312,7 +321,12 @@ else:
                 # DOCX was generated but PPTX failed - show warning
                 st.warning("⚠️ PowerPoint unavailable")
                 with st.expander("Why?"):
-                    st.caption("python-pptx library may not be installed. Check requirements.txt includes 'python-pptx'.")
+                    st.caption(f"PPTX_INSTALLED: {PPTX_INSTALLED}")
+                    st.caption(f"PPTX_AVAILABLE (from agents): {PPTX_AVAILABLE}")
+                    if not PPTX_INSTALLED:
+                        st.error("python-pptx is NOT installed. Reboot the Streamlit app to reinstall dependencies.")
+                    else:
+                        st.success("python-pptx IS installed - check if report generation created the file.")
             else:
                 st.caption("Click Generate to create reports")
 
