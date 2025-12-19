@@ -763,8 +763,8 @@ IMPORTANT:
 - **Total Costs Incurred:** {_gbp(fin.get('total_costs_incurred'))}
 
 ### Profit Distribution (80/20 split on GROSS DBA)
-- **Funder Return (80%):** {_gbp(fin.get('funder_expected_return'))}
-- **Firm Return (20%):** {_gbp(fin.get('firm_expected_return'))}
+- **LP Return (80%):** {_gbp(fin.get('funder_expected_return'))}
+- **GP Return (20%):** {_gbp(fin.get('firm_expected_return'))}
 
 ### Performance Metrics
 - **ROI Projection:** {_pct(fin.get('roi_projection'))}
@@ -959,7 +959,7 @@ def _build_dashboard_figures(monthly_data: Dict[str, Any], report_data: Dict[str
                 {"Step": "Total Expected Settlements", "Value": float(total_settlements or 0)},
                 {"Step": "DBA Proceeds (30%)", "Value": float(dba_proceeds or 0)},
                 {"Step": "Total Costs Incurred", "Value": float(total_costs or 0)},
-                {"Step": "Funder Return (80% of DBA)", "Value": float(funder_return or 0)},
+                {"Step": "LP Return (80% of DBA)", "Value": float(funder_return or 0)},
             ]
             df_fin = pd.DataFrame(rows)
             fig_fin = px.bar(
@@ -982,8 +982,8 @@ def _build_dashboard_figures(monthly_data: Dict[str, Any], report_data: Dict[str
             if funder_ret is not None or firm_ret is not None:
                 df_split = pd.DataFrame(
                     [
-                        {"Recipient": "Funder", "Value": float(funder_ret or 0)},
-                        {"Recipient": "Law Firm", "Value": float(firm_ret or 0)},
+                        {"Recipient": "LP (80%)", "Value": float(funder_ret or 0)},
+                        {"Recipient": "GP (20%)", "Value": float(firm_ret or 0)},
                     ]
                 )
                 fig_split = px.pie(
@@ -1220,26 +1220,13 @@ def build_investor_report_docx(
     )
     doc.add_paragraph("")
 
-    # Top lenders table
-    if lender_conc.get("top_5_lenders"):
-        doc.add_heading("Top 5 Lenders by Claims", level=2)
-        top_lender_rows = []
-        for lender in lender_conc.get("top_5_lenders", []):
-            top_lender_rows.append([
-                lender.get("lender", "Unknown"),
-                _fmt_num(lender.get("claims", 0)),
-                _fmt_pct(lender.get("percentage", 0))
-            ])
-        _add_table(["Lender", "Claims", "% of Total"], top_lender_rows)
-        doc.add_paragraph("")
-
-    # Full lender distribution table (all lenders from monthly data)
+    # Top 10 Lenders table (limited to top 10 only)
     if lenders:
-        doc.add_heading("Complete Lender Distribution", level=2)
-        doc.add_paragraph(f"Total of {len(lenders)} lenders in portfolio:")
+        doc.add_heading("Top 10 Lenders by Claims", level=2)
+        doc.add_paragraph(f"Showing top 10 of {len(lenders)} total lenders in portfolio:")
 
-        # Sort by claims descending
-        sorted_lenders = sorted(lenders, key=lambda x: x.get('num_claims', 0), reverse=True)
+        # Sort by claims descending and take top 10
+        sorted_lenders = sorted(lenders, key=lambda x: x.get('num_claims', 0), reverse=True)[:10]
 
         lender_rows = []
         for lender in sorted_lenders:
@@ -1268,8 +1255,8 @@ def build_investor_report_docx(
             ["Total Settlement Value", _fmt_currency(fin.get("total_settlements"))],
             ["DBA Proceeds (30%)", _fmt_currency(fin.get("dba_proceeds_expected"))],
             ["Total Costs Incurred", _fmt_currency(fin.get("total_costs_incurred"))],
-            ["Funder Return (80% of DBA)", _fmt_currency(fin.get("funder_expected_return"))],
-            ["Firm Return (20% of DBA)", _fmt_currency(fin.get("firm_expected_return"))],
+            ["LP Return (80% of DBA)", _fmt_currency(fin.get("funder_expected_return"))],
+            ["GP Return (20% of DBA)", _fmt_currency(fin.get("firm_expected_return"))],
             ["ROI Projection", _fmt_pct(fin.get("roi_projection"))],
             ["MOIC Projection", f"{fin.get('moic_projection', 0):.2f}x" if fin.get('moic_projection') else "N/A"],
         ]
@@ -1293,8 +1280,9 @@ def build_investor_report_docx(
     # Profit Distribution explanation
     doc.add_heading("Profit Distribution (Priority Deed Terms)", level=2)
     doc.add_paragraph("• DBA Rate: 30% of settlements")
-    doc.add_paragraph("• Split: 80/20 (Funder/Milberg) on GROSS DBA proceeds")
-    doc.add_paragraph("• Costs paid separately by Funder")
+    doc.add_paragraph("• Split: 80/20 (LP/GP) on GROSS DBA proceeds")
+    doc.add_paragraph("• LP = Limited Partner (Funder), GP = General Partner (Milberg)")
+    doc.add_paragraph("• Costs paid separately by LP")
     doc.add_paragraph("")
 
     if cost_eff.get("efficiency_trends"):
@@ -1672,7 +1660,8 @@ def build_investor_report_pptx(
         ["Total Clients", _fmt_num(perf.get("total_clients") or pm.get("unique_clients", 0))],
         ["Total Lenders", _fmt_num(len(lenders))],
         ["Portfolio Value", _fmt_currency(perf.get("total_portfolio_value") or pm.get("total_settlement_value", 0))],
-        ["Funder Return (80%)", _fmt_currency(fin.get("funder_expected_return"))],
+        ["LP Return (80%)", _fmt_currency(fin.get("funder_expected_return"))],
+        ["GP Return (20%)", _fmt_currency(fin.get("firm_expected_return"))],
         ["MOIC", f"{fin.get('moic_projection', 0):.2f}x" if fin.get('moic_projection') else "N/A"],
         ["ROI", _fmt_pct(fin.get("roi_projection"))],
         ["Compliance Status", (comp.get("fca_compliance_status") or "N/A").upper()],
@@ -1697,8 +1686,8 @@ def build_investor_report_pptx(
         ["Total Settlement Value", _fmt_currency(fin.get("total_settlements"))],
         ["DBA Proceeds (30%)", _fmt_currency(fin.get("dba_proceeds_expected"))],
         ["Total Costs Incurred", _fmt_currency(fin.get("total_costs_incurred"))],
-        ["Funder Return (80% of DBA)", _fmt_currency(fin.get("funder_expected_return"))],
-        ["Firm Return (20% of DBA)", _fmt_currency(fin.get("firm_expected_return"))],
+        ["LP Return (80% of DBA)", _fmt_currency(fin.get("funder_expected_return"))],
+        ["GP Return (20% of DBA)", _fmt_currency(fin.get("firm_expected_return"))],
         ["ROI Projection", _fmt_pct(fin.get("roi_projection"))],
         ["MOIC Projection", f"{fin.get('moic_projection', 0):.2f}x" if fin.get('moic_projection') else "N/A"],
     ]

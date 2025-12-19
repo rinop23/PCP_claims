@@ -285,31 +285,31 @@ else:
         col_r1, col_r2, col_r3, col_r4 = st.columns([1, 1, 1, 1])
 
         with col_r1:
-            generate_clicked = st.button("🧠 Generate Investor Report", type="primary")
+            generate_clicked = st.button("🧠 Generate Reports (Word + PowerPoint)", type="primary")
 
         with col_r2:
             if st.session_state.investor_report_docx_bytes:
                 st.download_button(
-                    label="⬇️ Word Report",
+                    label="📄 Download Word Report",
                     data=st.session_state.investor_report_docx_bytes,
                     file_name=os.path.basename(st.session_state.investor_report_docx_path or "monthly_investor_report.docx"),
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     use_container_width=True,
                 )
             else:
-                st.caption("Generate to enable Word download")
+                st.caption("Click Generate to create reports")
 
         with col_r3:
             if st.session_state.investor_report_pptx_bytes:
                 st.download_button(
-                    label="⬇️ PowerPoint Report",
+                    label="📊 Download PowerPoint",
                     data=st.session_state.investor_report_pptx_bytes,
                     file_name=os.path.basename(st.session_state.investor_report_pptx_path or "monthly_investor_report.pptx"),
                     mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                     use_container_width=True,
                 )
             else:
-                st.caption("Generate to enable PPTX download")
+                st.caption("Click Generate to create reports")
 
         with col_r4:
             import sys
@@ -397,8 +397,12 @@ else:
 
         st.markdown("---")
 
-        # KPI Dashboard
-        col1, col2, col3, col4, col5 = st.columns(5)
+        # KPI Dashboard - Split Funder Return into LP (80%) and GP (20%)
+        # The DBA proceeds are split 80/20 between Funder (LP) and Milberg (GP)
+        lp_return = financials['funder_return']  # 80% of DBA proceeds
+        gp_return = financials['firm_return']    # 20% of DBA proceeds
+
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
 
         with col1:
             st.metric("Total Claims", f"{totals.get('total_claims', 0):,}")
@@ -413,7 +417,10 @@ else:
             st.metric("Portfolio Value", f"£{totals.get('total_estimated_value', 0)/1000:.0f}K")
 
         with col5:
-            st.metric("Funder Return (80%)", f"£{financials['funder_return']/1000:.1f}K")
+            st.metric("LP Return (80%)", f"£{lp_return/1000:.1f}K")
+
+        with col6:
+            st.metric("GP Return (20%)", f"£{gp_return/1000:.1f}K")
 
         st.markdown("---")
 
@@ -618,8 +625,8 @@ else:
                     'Total Settlement Value',
                     'DBA Proceeds (30%)',
                     'Total Costs Incurred',
-                    'Funder Return (80% of DBA)',
-                    'Milberg Return (20% of DBA)',
+                    'LP Return (80% of DBA)',
+                    'GP Return (20% of DBA)',
                     'ROI',
                     'MOIC'
                 ],
@@ -644,7 +651,7 @@ else:
                 name="Cash Flow",
                 orientation="v",
                 measure=["absolute", "relative", "relative", "total"],
-                x=["Settlement Value", "DBA Fee (30%)", "Less: Costs", "Funder Return"],
+                x=["Settlement Value", "DBA Fee (30%)", "Less: Costs", "LP Return"],
                 y=[
                     financials['total_settlement'],
                     financials['dba_proceeds'] - financials['total_settlement'],
@@ -665,7 +672,7 @@ else:
             ))
 
             fig_waterfall.update_layout(
-                title="From Settlement to Funder Return",
+                title="From Settlement to LP Return",
                 height=500,
                 showlegend=False
             )
@@ -680,9 +687,9 @@ else:
             with col1:
                 st.subheader("Profit Distribution (Priority Deed)")
 
-                # Profit split pie chart
+                # Profit split pie chart - LP (Funder) and GP (Milberg)
                 fig_split = go.Figure(data=[go.Pie(
-                    labels=['Funder (80%)', 'Milberg (20%)'],
+                    labels=['LP (80%)', 'GP (20%)'],
                     values=[financials['funder_return'], financials['firm_return']],
                     hole=0.4,
                     marker_colors=['#3498db', '#2ecc71'],
@@ -709,16 +716,17 @@ else:
                 st.info("""
                 **Priority Deed Terms:**
                 - DBA Rate: 30% of settlements
-                - Split: 80/20 (Funder/Milberg) on GROSS DBA proceeds
-                - Costs paid separately by Funder
+                - Split: 80/20 (LP/GP) on GROSS DBA proceeds
+                - LP = Limited Partner (Funder), GP = General Partner (Milberg)
+                - Costs paid separately by LP
                 """)
 
             with col2:
                 st.subheader("Performance Metrics")
 
-                # ROI and MOIC
+                # ROI and MOIC with LP/GP terminology
                 metrics_df = pd.DataFrame({
-                    'Metric': ['Funder Return', 'Milberg Return', 'ROI', 'MOIC'],
+                    'Metric': ['LP Return', 'GP Return', 'ROI', 'MOIC'],
                     'Value': [
                         f"£{financials['funder_return']:,.2f}",
                         f"£{financials['firm_return']:,.2f}",
@@ -726,8 +734,8 @@ else:
                         f"{financials['moic']:.2f}x"
                     ],
                     'Description': [
-                        '80% of GROSS DBA proceeds',
-                        '20% of GROSS DBA proceeds',
+                        '80% of GROSS DBA proceeds (Funder)',
+                        '20% of GROSS DBA proceeds (Milberg)',
                         'Return on Investment',
                         'Multiple on Invested Capital'
                     ]
