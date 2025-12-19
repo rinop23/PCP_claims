@@ -308,6 +308,11 @@ else:
                     mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                     use_container_width=True,
                 )
+            elif st.session_state.investor_report_docx_bytes:
+                # DOCX was generated but PPTX failed - show warning
+                st.warning("⚠️ PowerPoint unavailable")
+                with st.expander("Why?"):
+                    st.caption("python-pptx library may not be installed. Check requirements.txt includes 'python-pptx'.")
             else:
                 st.caption("Click Generate to create reports")
 
