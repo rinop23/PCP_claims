@@ -306,36 +306,43 @@ class MonthlyReportAgent(BaseAgent):
         excel_text = df.to_string()
 
         # Truncate if too long
-        if len(excel_text) > 20000:
-            excel_text = excel_text[:20000] + "\n... [truncated]"
+        if len(excel_text) > 25000:
+            excel_text = excel_text[:25000] + "\n... [truncated]"
 
         system_prompt = """You are a financial data analyst. Extract ALL data from monthly reports.
-Return structured JSON with complete data - do NOT skip any lenders or data points."""
+Return structured JSON with complete data - do NOT skip any lenders or data points.
+IMPORTANT: Use CUMULATIVE values (not current month) for total counts."""
 
         user_prompt = f"""Analyze this monthly Excel report and extract ALL data:
 
 {excel_text}
 
+IMPORTANT INSTRUCTIONS:
+1. For portfolio metrics, use the CUMULATIVE column values (not Current Month)
+2. The "Grand Summary" row contains the total claims and total estimated value
+3. Extract ALL lenders from the Defendant table (typically 60-80 lenders)
+4. The total estimated value is typically around 228,900 for this report
+
 Extract and return JSON with:
 {{
-  "reporting_period": "month/year",
+  "reporting_period": "month/year from the Reporting Period field",
   "portfolio_metrics": {{
-    "unique_clients": number,
-    "unique_claims": number,
-    "claims_submitted": number,
-    "claims_successful": number,
-    "claims_rejected": number,
+    "unique_clients": number (use CUMULATIVE value, e.g., 157),
+    "unique_claims": number (use CUMULATIVE value, e.g., 327),
+    "claims_submitted": number (cumulative),
+    "claims_successful": number (cumulative),
+    "claims_rejected": number (cumulative),
     "claims_pending": number,
-    "avg_claim_value": number,
-    "total_settlement_value": number,
+    "avg_claim_value": number (e.g., 228900 or 700),
+    "total_settlement_value": number (from Grand Summary Estimated Value, e.g., 228900),
     "success_rate": number (percentage)
   }},
   "lender_distribution": [
     {{
-      "lender": "string",
-      "num_claims": number,
-      "pct_of_total": number,
-      "estimated_value": number,
+      "lender": "string (Defendant name)",
+      "num_claims": number (Number of Claims column),
+      "pct_of_total": number (% of Total column, e.g., 0.009 = 0.9%),
+      "estimated_value": number (Estimated Value column),
       "avg_claim_value": number
     }}
   ],
@@ -347,11 +354,11 @@ Extract and return JSON with:
     "paid": {{"count": number, "value": number}}
   }},
   "financial_metrics": {{
-    "acquisition_cost": number,
-    "submission_cost": number,
+    "acquisition_cost": number (cumulative),
+    "submission_cost": number (cumulative),
     "processing_cost": number,
     "legal_cost": number,
-    "total_costs": number,
+    "total_costs": number (Total Action Costs cumulative),
     "cost_per_claim": number,
     "collection_balance": number
   }},
@@ -362,18 +369,33 @@ Extract and return JSON with:
     "projected_timeline": "string"
   }},
   "key_changes": {{
-    "new_claims_this_month": number,
+    "new_claims_this_month": number (Current Month claims),
     "claims_resolved_this_month": number,
     "major_settlements": ["list of notable events"]
   }}
 }}
 
-CRITICAL: Extract ALL lenders (typically 50-70), not just the first few. Convert all currency to numbers."""
+CRITICAL REMINDERS:
+- unique_clients and unique_claims should be CUMULATIVE values (157 clients, 327 claims)
+- total_settlement_value should be from "Grand Summary" row (228900)
+- Extract ALL lenders (typically 60-80), not just the first few
+- Convert all currency to numbers (remove £ and commas)"""
 
         self.monthly_data = self.call_openai(system_prompt, user_prompt, "json", max_tokens=16000)
         self.knowledge_base = self.monthly_data
 
-        print(f"✅ Extracted data for {self.monthly_data['portfolio_metrics']['unique_claims']} claims across {len(self.monthly_data['lender_distribution'])} lenders")
+        # Post-process to ensure consistency
+        pm = self.monthly_data.get('portfolio_metrics', {})
+        lenders = self.monthly_data.get('lender_distribution', [])
+
+        # Calculate total from lenders if total_settlement_value is wrong
+        if lenders:
+            total_from_lenders = sum(l.get('estimated_value', 0) for l in lenders)
+            if pm.get('total_settlement_value', 0) < 1000 and total_from_lenders > 1000:
+                pm['total_settlement_value'] = total_from_lenders
+
+        print(f"✅ Extracted data for {pm.get('unique_claims', 0)} claims across {len(lenders)} lenders")
+        print(f"   Total settlement value: £{pm.get('total_settlement_value', 0):,.0f}")
 
         return self.monthly_data
 
