@@ -8,6 +8,24 @@ import json
 from typing import Dict, Any, List
 from openai import OpenAI
 import pandas as pd
+from docx import Document as DocxDocument
+
+
+def read_docx_file(file_path: str) -> str:
+    """Read text content from a DOCX file"""
+    try:
+        doc = DocxDocument(file_path)
+        full_text = []
+        for para in doc.paragraphs:
+            full_text.append(para.text)
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    full_text.append(cell.text)
+        return '\n'.join(full_text)
+    except Exception as e:
+        print(f"Error reading DOCX {file_path}: {e}")
+        return ""
 
 
 class BaseAgent:
@@ -361,21 +379,38 @@ def analyze_monthly_report(excel_path: str) -> Dict[str, Any]:
     """
     print("🤖 Initializing intelligent agents...")
 
-    # Read supporting documents
+    # Read supporting documents (DOCX files)
     priority_deed = ""
-    fca_guidelines = ""
+    funding_agreement = ""
 
-    try:
-        with open("DOCS/Priorities Deed (EXECUTED).pdf", "r", encoding="utf-8", errors="ignore") as f:
-            priority_deed = f.read()[:5000]
-    except:
-        priority_deed = "Priority Deed: 80% Funder, 20% Firm split after costs"
+    # Read Priority Deed
+    priority_deed_path = "DOCS/Priorities Deed (EV 9 October 2025).docx"
+    if os.path.exists(priority_deed_path):
+        priority_deed = read_docx_file(priority_deed_path)
+        print(f"✓ Loaded Priority Deed ({len(priority_deed)} chars)")
+    else:
+        priority_deed = """Priority Deed Summary:
+        - DBA Proceeds: 30% of total successful claim amounts
+        - Funder Share: 80% of Net Proceeds
+        - Milberg Share: 20% of Net Proceeds
+        - Payment Waterfall: Costs first, then Funder return, then profit split"""
+        print("⚠ Using default Priority Deed terms")
 
-    try:
-        with open("DOCS/FCA Redress Knowledge Base.pdf", "r", encoding="utf-8", errors="ignore") as f:
-            fca_guidelines = f.read()[:5000]
-    except:
-        fca_guidelines = "FCA Guidelines for PCP claims redress"
+    # Read Funding Agreement (contains FCA compliance info)
+    funding_agreement_path = "DOCS/Motor Finance Redress Funding Agreement (EV 10 October 2025).docx"
+    if os.path.exists(funding_agreement_path):
+        funding_agreement = read_docx_file(funding_agreement_path)
+        print(f"✓ Loaded Funding Agreement ({len(funding_agreement)} chars)")
+    else:
+        funding_agreement = """FCA Motor Finance Redress Guidelines:
+        - Commission disclosure requirements
+        - Fair treatment of customers
+        - Claims processing standards
+        - Regulatory compliance requirements"""
+        print("⚠ Using default FCA guidelines")
+
+    # Combine for FCA guidelines context
+    fca_guidelines = funding_agreement if funding_agreement else "FCA Guidelines for PCP claims redress"
 
     # Initialize agents
     excel_agent = ExcelAnalysisAgent()
