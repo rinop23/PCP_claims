@@ -143,7 +143,10 @@ Be precise with percentages and rules."""
         return self.profit_rules
 
     def calculate_distributions(self, total_settlement: float, total_costs: float) -> Dict[str, float]:
-        """Calculate profit distributions based on Priority Deed rules"""
+        """Calculate profit distributions based on Priority Deed rules
+
+        IMPORTANT: The 80/20 split is on GROSS DBA proceeds, NOT net proceeds after costs.
+        """
 
         if not self.profit_rules:
             raise ValueError("Priority Deed must be read first")
@@ -152,20 +155,20 @@ Be precise with percentages and rules."""
         dba_rate = self.profit_rules['dba_rate']['percentage_of_settlement'] / 100
         dba_proceeds = total_settlement * dba_rate
 
-        # Subtract costs first (based on waterfall)
-        net_proceeds = dba_proceeds - total_costs
-
-        # Split remaining proceeds
+        # Split GROSS DBA proceeds (not net after costs)
         funder_split = self.profit_rules['profit_split']['funder_percentage'] / 100
         firm_split = self.profit_rules['profit_split']['law_firm_percentage'] / 100
+
+        # Funder and Milberg split the GROSS DBA proceeds
+        funder_share = dba_proceeds * funder_split
+        firm_share = dba_proceeds * firm_split
 
         return {
             "total_settlement": total_settlement,
             "dba_proceeds": dba_proceeds,
             "total_costs": total_costs,
-            "net_proceeds": net_proceeds,
-            "funder_share": net_proceeds * funder_split,
-            "firm_share": net_proceeds * firm_split,
+            "funder_share": funder_share,
+            "firm_share": firm_share,
             "funder_percentage": self.profit_rules['profit_split']['funder_percentage'],
             "firm_percentage": self.profit_rules['profit_split']['law_firm_percentage']
         }
@@ -440,11 +443,14 @@ class InvestorReportAgent(BaseAgent):
                 firm_pct = split_info.get('law_firm_percentage', 20)
 
         # Calculate financials
+        # IMPORTANT: The 80/20 split is on GROSS DBA proceeds, NOT net proceeds after costs
         dba_proceeds = total_settlement * (dba_rate / 100)
         total_costs = fm.get('total_costs', 0)
-        net_proceeds = dba_proceeds - total_costs
-        funder_return = net_proceeds * (funder_pct / 100) if net_proceeds > 0 else 0
-        firm_return = net_proceeds * (firm_pct / 100) if net_proceeds > 0 else 0
+
+        # Funder and Milberg split the GROSS DBA proceeds (not net after costs)
+        funder_return = dba_proceeds * (funder_pct / 100)
+        firm_return = dba_proceeds * (firm_pct / 100)
+
         # ROI = (Return - Investment) / Investment * 100
         # MOIC = Return / Investment
         roi = ((funder_return - total_costs) / total_costs * 100) if total_costs > 0 else 0
@@ -456,7 +462,6 @@ class InvestorReportAgent(BaseAgent):
             "dba_rate": dba_rate,
             "dba_proceeds": dba_proceeds,
             "total_costs": total_costs,
-            "net_proceeds": net_proceeds,
             "funder_return": funder_return,
             "firm_return": firm_return,
             "funder_percentage": funder_pct,
@@ -469,7 +474,7 @@ class InvestorReportAgent(BaseAgent):
             "pipeline_value": sum(stage.get('value', 0) for stage in pipeline.values() if isinstance(stage, dict))
         }
 
-        print(f"   Pre-calculated: settlement=£{total_settlement:,.0f}, DBA=£{dba_proceeds:,.0f}, net=£{net_proceeds:,.0f}")
+        print(f"   Pre-calculated: settlement=£{total_settlement:,.0f}, DBA=£{dba_proceeds:,.0f}, funder=£{funder_return:,.0f}, MOIC={moic:.2f}x")
 
         system_prompt = """You are a senior investment analyst creating monthly investor reports for litigation funding stakeholders.
 Generate factual, data-driven analysis. Include detailed analysis for each section matching the dashboard tabs:
@@ -497,12 +502,12 @@ CRITICAL INSTRUCTIONS:
 2. total_settlements = {total_settlement} (the total portfolio value)
 3. dba_proceeds_expected = {dba_proceeds:.2f} (30% of settlements)
 4. total_costs_incurred = {total_costs:.2f}
-5. net_proceeds_after_costs = {net_proceeds:.2f}
-6. funder_expected_return = {funder_return:.2f} ({funder_pct}% of net)
-7. firm_expected_return = {firm_return:.2f} ({firm_pct}% of net)
-8. total_claims = {pre_calculated['total_claims']}
-9. total_clients = {pre_calculated['total_clients']}
-10. total_portfolio_value = {total_settlement}
+5. funder_expected_return = {funder_return:.2f} ({funder_pct}% of GROSS DBA proceeds)
+6. firm_expected_return = {firm_return:.2f} ({firm_pct}% of GROSS DBA proceeds)
+7. total_claims = {pre_calculated['total_claims']}
+8. total_clients = {pre_calculated['total_clients']}
+9. total_portfolio_value = {total_settlement}
+NOTE: The split is on GROSS DBA proceeds, NOT net proceeds after costs.
 
 Generate a structured investor report in JSON format:
 {{
@@ -525,7 +530,6 @@ Generate a structured investor report in JSON format:
     "total_settlements": number,
     "dba_proceeds_expected": number,
     "total_costs_incurred": number,
-    "net_proceeds_after_costs": number,
     "funder_expected_return": number,
     "firm_expected_return": number,
     "roi_projection": number,
@@ -623,7 +627,6 @@ IMPORTANT:
         fa['total_settlements'] = pre_calculated.get('total_settlement_value', 0)
         fa['dba_proceeds_expected'] = pre_calculated.get('dba_proceeds', 0)
         fa['total_costs_incurred'] = pre_calculated.get('total_costs', 0)
-        fa['net_proceeds_after_costs'] = pre_calculated.get('net_proceeds', 0)
         fa['funder_expected_return'] = pre_calculated.get('funder_return', 0)
         fa['firm_expected_return'] = pre_calculated.get('firm_return', 0)
         fa['roi_projection'] = pre_calculated.get('roi', 0)
@@ -639,7 +642,7 @@ IMPORTANT:
             report_data['pipeline_analysis'] = {}
         report_data['pipeline_analysis']['pipeline_value'] = pre_calculated.get('pipeline_value', 0)
 
-        print(f"   Forced financials: settlements=£{fa['total_settlements']:,.0f}, DBA=£{fa['dba_proceeds_expected']:,.0f}, net=£{fa['net_proceeds_after_costs']:,.0f}")
+        print(f"   Forced financials: settlements=£{fa['total_settlements']:,.0f}, DBA=£{fa['dba_proceeds_expected']:,.0f}, funder=£{fa['funder_expected_return']:,.0f}, MOIC={fa['moic_projection']:.2f}x")
 
         return report_data
 
@@ -743,13 +746,12 @@ IMPORTANT:
 - **Total Expected Settlements:** {_gbp(fin.get('total_settlements'))}
 - **DBA Proceeds (30%):** {_gbp(fin.get('dba_proceeds_expected'))}
 
-### Costs & Returns
+### Costs
 - **Total Costs Incurred:** {_gbp(fin.get('total_costs_incurred'))}
-- **Net Proceeds:** {_gbp(fin.get('net_proceeds_after_costs'))}
 
-### Profit Distribution
-- **Funder Return:** {_gbp(fin.get('funder_expected_return'))}
-- **Firm Return:** {_gbp(fin.get('firm_expected_return'))}
+### Profit Distribution (80/20 split on GROSS DBA)
+- **Funder Return (80%):** {_gbp(fin.get('funder_expected_return'))}
+- **Firm Return (20%):** {_gbp(fin.get('firm_expected_return'))}
 
 ### Performance Metrics
 - **ROI Projection:** {_pct(fin.get('roi_projection'))}
@@ -937,14 +939,14 @@ def _build_dashboard_figures(monthly_data: Dict[str, Any], report_data: Dict[str
         total_settlements = fin.get("total_settlements")
         dba_proceeds = fin.get("dba_proceeds_expected")
         total_costs = fin.get("total_costs_incurred")
-        net_proceeds = fin.get("net_proceeds_after_costs")
+        funder_return = fin.get("funder_expected_return")
 
-        if any(v is not None for v in [total_settlements, dba_proceeds, total_costs, net_proceeds]):
+        if any(v is not None for v in [total_settlements, dba_proceeds, total_costs, funder_return]):
             rows = [
                 {"Step": "Total Expected Settlements", "Value": float(total_settlements or 0)},
-                {"Step": "DBA Proceeds Expected", "Value": float(dba_proceeds or 0)},
+                {"Step": "DBA Proceeds (30%)", "Value": float(dba_proceeds or 0)},
                 {"Step": "Total Costs Incurred", "Value": float(total_costs or 0)},
-                {"Step": "Net Proceeds After Costs", "Value": float(net_proceeds or 0)},
+                {"Step": "Funder Return (80% of DBA)", "Value": float(funder_return or 0)},
             ]
             df_fin = pd.DataFrame(rows)
             fig_fin = px.bar(
@@ -1143,9 +1145,8 @@ def build_investor_report_docx(
             ("Total Expected Settlements", fin.get("total_settlements", "N/A")),
             ("DBA Proceeds Expected", fin.get("dba_proceeds_expected", "N/A")),
             ("Total Costs Incurred", fin.get("total_costs_incurred", "N/A")),
-            ("Net Proceeds After Costs", fin.get("net_proceeds_after_costs", "N/A")),
-            ("Funder Expected Return", fin.get("funder_expected_return", "N/A")),
-            ("Firm Expected Return", fin.get("firm_expected_return", "N/A")),
+            ("Funder Expected Return (80% of DBA)", fin.get("funder_expected_return", "N/A")),
+            ("Firm Expected Return (20% of DBA)", fin.get("firm_expected_return", "N/A")),
             ("ROI Projection", fin.get("roi_projection", "N/A")),
             ("MOIC Projection", fin.get("moic_projection", "N/A")),
         ],

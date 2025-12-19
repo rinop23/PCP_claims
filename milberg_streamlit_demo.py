@@ -249,22 +249,22 @@ else:
         print(f"DASHBOARD DEBUG: clients_cum={portfolio.get('unique_clients_cumulative')}, lenders={len(lenders)}")
 
         # Calculate financials using 20-80 split (Milberg 20% / Funder 80%)
+        # Split is on GROSS DBA proceeds, NOT net proceeds after costs
         total_settlement = totals.get('total_estimated_value', 0)
         total_costs = costs.get('total_costs', 0)
         dba_rate = 0.30  # 30% DBA rate
-        funder_pct = 0.80  # Funder gets 80%
-        firm_pct = 0.20  # Milberg gets 20%
+        funder_pct = 0.80  # Funder gets 80% of DBA proceeds
+        firm_pct = 0.20  # Milberg gets 20% of DBA proceeds
 
         dba_proceeds = total_settlement * dba_rate
-        net_proceeds = dba_proceeds - total_costs
-        funder_return = net_proceeds * funder_pct if net_proceeds > 0 else 0
-        firm_return = net_proceeds * firm_pct if net_proceeds > 0 else 0
+        # Funder and Milberg split the GROSS DBA proceeds (not net after costs)
+        funder_return = dba_proceeds * funder_pct
+        firm_return = dba_proceeds * firm_pct
 
         financials = {
             'total_settlement': total_settlement,
             'dba_proceeds': dba_proceeds,
             'total_costs': total_costs,
-            'net_proceeds': net_proceeds,
             'funder_return': funder_return,
             'firm_return': firm_return,
             # ROI = (Return - Investment) / Investment * 100
@@ -595,9 +595,8 @@ else:
                     'Total Settlement Value',
                     'DBA Proceeds (30%)',
                     'Total Costs Incurred',
-                    'Net Proceeds After Costs',
-                    'Funder Return (80%)',
-                    'Milberg Return (20%)',
+                    'Funder Return (80% of DBA)',
+                    'Milberg Return (20% of DBA)',
                     'ROI',
                     'MOIC'
                 ],
@@ -605,7 +604,6 @@ else:
                     f"£{financials['total_settlement']:,.2f}",
                     f"£{financials['dba_proceeds']:,.2f}",
                     f"£{financials['total_costs']:,.2f}",
-                    f"£{financials['net_proceeds']:,.2f}",
                     f"£{financials['funder_return']:,.2f}",
                     f"£{financials['firm_return']:,.2f}",
                     f"{financials['roi']:.1f}%",
@@ -623,18 +621,18 @@ else:
                 name="Cash Flow",
                 orientation="v",
                 measure=["absolute", "relative", "relative", "total"],
-                x=["Settlement Value", "DBA Fee (30%)", "Less: Costs", "Net Proceeds"],
+                x=["Settlement Value", "DBA Fee (30%)", "Less: Costs", "Funder Return"],
                 y=[
                     financials['total_settlement'],
                     financials['dba_proceeds'] - financials['total_settlement'],
                     -financials['total_costs'],
-                    financials['net_proceeds']
+                    financials['funder_return']
                 ],
                 text=[
                     f"£{financials['total_settlement']:,.0f}",
                     f"£{financials['dba_proceeds']:,.0f}",
                     f"-£{financials['total_costs']:,.0f}",
-                    f"£{financials['net_proceeds']:,.0f}"
+                    f"£{financials['funder_return']:,.0f}"
                 ],
                 textposition="outside",
                 connector={"line": {"color": "rgb(63, 63, 63)"}},
@@ -644,7 +642,7 @@ else:
             ))
 
             fig_waterfall.update_layout(
-                title="From Settlement to Net Proceeds",
+                title="From Settlement to Funder Return",
                 height=500,
                 showlegend=False
             )
@@ -676,7 +674,7 @@ else:
                 fig_split.update_layout(
                     height=400,
                     annotations=[dict(
-                        text=f'Net Proceeds<br>£{financials["net_proceeds"]:,.0f}',
+                        text=f'DBA Proceeds<br>£{financials["dba_proceeds"]:,.0f}',
                         x=0.5, y=0.5,
                         font_size=14,
                         showarrow=False
@@ -688,8 +686,8 @@ else:
                 st.info("""
                 **Priority Deed Terms:**
                 - DBA Rate: 30% of settlements
-                - Split: 80/20 (Funder/Milberg) after costs
-                - Cost recovery: First priority
+                - Split: 80/20 (Funder/Milberg) on GROSS DBA proceeds
+                - Costs paid separately by Funder
                 """)
 
             with col2:
@@ -705,8 +703,8 @@ else:
                         f"{financials['moic']:.2f}x"
                     ],
                     'Description': [
-                        '80% of net proceeds',
-                        '20% of net proceeds',
+                        '80% of GROSS DBA proceeds',
+                        '20% of GROSS DBA proceeds',
                         'Return on Investment',
                         'Multiple on Invested Capital'
                     ]
