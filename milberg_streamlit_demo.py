@@ -25,13 +25,15 @@ try:
         generate_full_investor_report,
         MonthlyReportAgent,
         PriorityDeedAgent,
-        PPTX_AVAILABLE
+        PPTX_AVAILABLE,
+        PPTX_IMPORT_ERROR
     )
     AGENTS_AVAILABLE = True
 except Exception as e:
     print(f"Warning: Could not import intelligent_agents: {e}")
     AGENTS_AVAILABLE = False
     PPTX_AVAILABLE = False
+    PPTX_IMPORT_ERROR = None
     generate_full_investor_report = None
     MonthlyReportAgent = None
     PriorityDeedAgent = None
@@ -323,6 +325,29 @@ else:
                 with st.expander("Why?"):
                     st.caption(f"PPTX_INSTALLED: {PPTX_INSTALLED}")
                     st.caption(f"PPTX_AVAILABLE (from agents): {PPTX_AVAILABLE}")
+                    if PPTX_IMPORT_ERROR:
+                        st.error(f"PPTX import error (agents): {PPTX_IMPORT_ERROR}")
+
+                    # Extra diagnostics for Streamlit Community Cloud vs localhost differences
+                    try:
+                        import sys as _sys
+                        st.caption(f"python: {_sys.version.split()[0]}")
+                    except Exception:
+                        pass
+
+                    try:
+                        import importlib.metadata as _md
+                        st.caption(f"python-pptx dist: {_md.version('python-pptx')}")
+                    except Exception as e:
+                        st.caption(f"python-pptx dist: unknown ({type(e).__name__}: {e})")
+
+                    try:
+                        import pptx as _pptx
+                        st.caption(f"pptx module: {getattr(_pptx, '__file__', 'unknown')}")
+                        st.caption(f"pptx module version: {getattr(_pptx, '__version__', 'unknown')}")
+                    except Exception as e:
+                        st.error(f"import pptx failed: {type(e).__name__}: {e}")
+
                     if not PPTX_INSTALLED:
                         st.error("python-pptx is NOT installed. Reboot the Streamlit app to reinstall dependencies.")
                     else:

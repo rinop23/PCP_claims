@@ -13,17 +13,42 @@ from docx import Document
 from docx.shared import Inches
 import PyPDF2
 
+
+def _coerce_percentage(value: Any, *, default: float) -> float:
+    """Coerce a percentage-like value to a float in [0, 100].
+
+    Accepts ints/floats/strings; also accepts fractional inputs in (0, 1] and
+    converts them to 0-100. Falls back to `default` when value is missing/invalid.
+    """
+    if value is None:
+        return float(default)
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+    # If the model returned 0.8 instead of 80, treat as fraction.
+    if 0 < v <= 1:
+        v *= 100.0
+
+    # Guardrails
+    if v != v:  # NaN
+        return float(default)
+    if v < 0 or v > 100:
+        return float(default)
+    return float(v)
+
 # PowerPoint imports
+# Keep this import as lightweight as possible so PPTX generation isn't disabled
+# due to optional/deeper dependencies failing at import time.
+PPTX_IMPORT_ERROR: str | None = None
 try:
     from pptx import Presentation
-    from pptx.util import Inches as PptxInches, Pt
-    from pptx.dml.color import RgbColor
-    from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
-    from pptx.enum.shapes import MSO_SHAPE
     PPTX_AVAILABLE = True
-except ImportError:
+except Exception as e:
     PPTX_AVAILABLE = False
     Presentation = None
+    PPTX_IMPORT_ERROR = f"{type(e).__name__}: {e}"
 
 
 class BaseAgent:
@@ -88,7 +113,7 @@ class PriorityDeedAgent(BaseAgent):
     def read_priority_deed(self, file_path: str = "DOCS/Priorities Deed (EV 9 October 2025).docx") -> Dict[str, Any]:
         """Read Priority Deed document and extract profit distribution rules"""
 
-        print("📄 Priority Deed Agent: Reading profit distribution agreement...")
+        print("[Priority Deed Agent] Reading profit distribution agreement...")
 
         try:
             # Read Word document
@@ -151,7 +176,10 @@ Be precise with percentages and rules."""
         self.profit_rules = self.call_openai(system_prompt, user_prompt, "json")
         self.knowledge_base = self.profit_rules
 
-        print(f"✅ Extracted profit split: {self.profit_rules['profit_split']['funder_percentage']}% Funder / {self.profit_rules['profit_split']['law_firm_percentage']}% Law Firm")
+        split = (self.profit_rules or {}).get("profit_split") or {}
+        funder_pct = _coerce_percentage(split.get("funder_percentage"), default=80)
+        firm_pct = _coerce_percentage(split.get("law_firm_percentage"), default=20)
+        print(f"[OK] Extracted profit split: {funder_pct:.0f}% Funder / {firm_pct:.0f}% Law Firm")
 
         return self.profit_rules
 
@@ -165,12 +193,22 @@ Be precise with percentages and rules."""
             raise ValueError("Priority Deed must be read first")
 
         # Calculate DBA proceeds (typically 30% of settlement)
-        dba_rate = self.profit_rules['dba_rate']['percentage_of_settlement'] / 100
+        dba_info = (self.profit_rules or {}).get("dba_rate") or {}
+        dba_pct = _coerce_percentage(dba_info.get("percentage_of_settlement"), default=30)
+        dba_rate = dba_pct / 100.0
         dba_proceeds = total_settlement * dba_rate
 
         # Split GROSS DBA proceeds (not net after costs)
-        funder_split = self.profit_rules['profit_split']['funder_percentage'] / 100
-        firm_split = self.profit_rules['profit_split']['law_firm_percentage'] / 100
+        split_info = (self.profit_rules or {}).get("profit_split") or {}
+        funder_pct = _coerce_percentage(split_info.get("funder_percentage"), default=80)
+        firm_pct = _coerce_percentage(split_info.get("law_firm_percentage"), default=20)
+
+        # If values are inconsistent, fall back to 80/20.
+        if round(funder_pct + firm_pct, 3) != 100.0:
+            funder_pct, firm_pct = 80.0, 20.0
+
+        funder_split = funder_pct / 100.0
+        firm_split = firm_pct / 100.0
 
         # Funder and Milberg split the GROSS DBA proceeds
         funder_share = dba_proceeds * funder_split
@@ -182,8 +220,8 @@ Be precise with percentages and rules."""
             "total_costs": total_costs,
             "funder_share": funder_share,
             "firm_share": firm_share,
-            "funder_percentage": self.profit_rules['profit_split']['funder_percentage'],
-            "firm_percentage": self.profit_rules['profit_split']['law_firm_percentage']
+            "funder_percentage": funder_pct,
+            "firm_percentage": firm_pct
         }
 
 
@@ -197,7 +235,7 @@ class FCAComplianceAgent(BaseAgent):
     def read_fca_scheme(self, file_path: str = "FCA redress scheme/Redress Scheme.pdf") -> Dict[str, Any]:
         """Read FCA Redress Scheme PDF and extract compliance rules"""
 
-        print("⚖️ FCA Compliance Agent: Reading FCA Redress Scheme...")
+        print("[FCA Compliance Agent] Reading FCA Redress Scheme...")
 
         try:
             # Read PDF
@@ -266,7 +304,7 @@ Be specific with thresholds and criteria."""
         self.compliance_rules = self.call_openai(system_prompt, user_prompt, "json")
         self.knowledge_base = self.compliance_rules
 
-        print(f"✅ Loaded FCA compliance rules for {len(self.compliance_rules.get('eligible_products', []))} product types")
+        print(f"[OK] Loaded FCA compliance rules for {len(self.compliance_rules.get('eligible_products', []))} product types")
 
         return self.compliance_rules
 
@@ -313,7 +351,7 @@ class MonthlyReportAgent(BaseAgent):
     def analyze_monthly_report(self, file_path: str) -> Dict[str, Any]:
         """Analyze monthly Excel report and extract all metrics"""
 
-        print("📊 Monthly Report Agent: Analyzing Excel report...")
+        print("[Monthly Report Agent] Analyzing Excel report...")
 
         # Read Excel file
         xl = pd.ExcelFile(file_path)
@@ -410,8 +448,8 @@ CRITICAL REMINDERS:
             if pm.get('total_settlement_value', 0) < 1000 and total_from_lenders > 1000:
                 pm['total_settlement_value'] = total_from_lenders
 
-        print(f"✅ Extracted data for {pm.get('unique_claims', 0)} claims across {len(lenders)} lenders")
-        print(f"   Total settlement value: £{pm.get('total_settlement_value', 0):,.0f}")
+        print(f"[OK] Extracted data for {pm.get('unique_claims', 0)} claims across {len(lenders)} lenders")
+        print(f"   Total settlement value: GBP {pm.get('total_settlement_value', 0):,.0f}")
 
         return self.monthly_data
 
@@ -428,7 +466,7 @@ class InvestorReportAgent(BaseAgent):
                                 compliance_rules: Dict[str, Any]) -> Dict[str, Any]:
         """Generate comprehensive investor report combining all agent insights"""
 
-        print("📝 Investor Report Agent: Generating comprehensive report...")
+        print("[Investor Report Agent] Generating comprehensive report...")
 
         # Pre-calculate key financial metrics to ensure accuracy
         pm = monthly_data.get('portfolio_metrics', {})
@@ -441,28 +479,32 @@ class InvestorReportAgent(BaseAgent):
         if total_settlement == 0 and lenders:
             total_settlement = sum(l.get('estimated_value', 0) for l in lenders)
 
-        # Get profit split rules (Milberg 20% / Funder 80% of net proceeds after costs)
-        dba_rate = 30  # Default 30% DBA rate on settlements
-        funder_pct = 80  # Funder gets 80%
-        firm_pct = 20  # Milberg (Law Firm) gets 20%
+        # Get profit split rules (IMPORTANT: 80/20 is on GROSS DBA proceeds, not net after costs)
+        dba_rate = 30.0  # Default 30% DBA rate on settlements
+        funder_pct = 80.0  # Funder gets 80%
+        firm_pct = 20.0  # Milberg (Law Firm) gets 20%
 
         if profit_rules:
             dba_info = profit_rules.get('dba_rate', {})
             if isinstance(dba_info, dict):
-                dba_rate = dba_info.get('percentage_of_settlement', 30)
+                dba_rate = _coerce_percentage(dba_info.get('percentage_of_settlement'), default=30)
             split_info = profit_rules.get('profit_split', {})
             if isinstance(split_info, dict):
-                funder_pct = split_info.get('funder_percentage', 80)
-                firm_pct = split_info.get('law_firm_percentage', 20)
+                funder_pct = _coerce_percentage(split_info.get('funder_percentage'), default=80)
+                firm_pct = _coerce_percentage(split_info.get('law_firm_percentage'), default=20)
+
+        # Normalize/repair if inconsistent (e.g., missing one side or bad extraction)
+        if round(funder_pct + firm_pct, 3) != 100.0:
+            funder_pct, firm_pct = 80.0, 20.0
 
         # Calculate financials
         # IMPORTANT: The 80/20 split is on GROSS DBA proceeds, NOT net proceeds after costs
-        dba_proceeds = total_settlement * (dba_rate / 100)
+        dba_proceeds = total_settlement * (dba_rate / 100.0)
         total_costs = fm.get('total_costs', 0)
 
         # Funder and Milberg split the GROSS DBA proceeds (not net after costs)
-        funder_return = dba_proceeds * (funder_pct / 100)
-        firm_return = dba_proceeds * (firm_pct / 100)
+        funder_return = dba_proceeds * (funder_pct / 100.0)
+        firm_return = dba_proceeds * (firm_pct / 100.0)
 
         # ROI = (Return - Investment) / Investment * 100
         # MOIC = Return / Investment
@@ -487,7 +529,7 @@ class InvestorReportAgent(BaseAgent):
             "pipeline_value": sum(stage.get('value', 0) for stage in pipeline.values() if isinstance(stage, dict))
         }
 
-        print(f"   Pre-calculated: settlement=£{total_settlement:,.0f}, DBA=£{dba_proceeds:,.0f}, funder=£{funder_return:,.0f}, MOIC={moic:.2f}x")
+        print(f"   Pre-calculated: settlement=GBP {total_settlement:,.0f}, DBA=GBP {dba_proceeds:,.0f}, funder=GBP {funder_return:,.0f}, MOIC={moic:.2f}x")
 
         system_prompt = """You are a senior investment analyst creating monthly investor reports for litigation funding stakeholders.
 Generate factual, data-driven analysis. Include detailed analysis for each section matching the dashboard tabs:
@@ -614,7 +656,7 @@ IMPORTANT:
         # Generate a short narrative (few lines) to accompany charts in the DOCX
         narrative = self._generate_short_narrative(report_data)
 
-        print("✅ Investor report generated successfully")
+        print("[OK] Investor report generated successfully")
 
         return {
             "report_data": report_data,
@@ -655,7 +697,7 @@ IMPORTANT:
             report_data['pipeline_analysis'] = {}
         report_data['pipeline_analysis']['pipeline_value'] = pre_calculated.get('pipeline_value', 0)
 
-        print(f"   Forced financials: settlements=£{fa['total_settlements']:,.0f}, DBA=£{fa['dba_proceeds_expected']:,.0f}, funder=£{fa['funder_expected_return']:,.0f}, MOIC={fa['moic_projection']:.2f}x")
+        print(f"   Forced financials: settlements=GBP {fa['total_settlements']:,.0f}, DBA=GBP {fa['dba_proceeds_expected']:,.0f}, funder=GBP {fa['funder_expected_return']:,.0f}, MOIC={fa['moic_projection']:.2f}x")
 
         return report_data
 
@@ -1516,15 +1558,23 @@ def build_investor_report_pptx(
     Each slide contains data tables and relevant charts organized together.
     """
     if not PPTX_AVAILABLE:
-        raise ImportError("python-pptx is not installed. Install with: pip install python-pptx")
+        detail = f" ({PPTX_IMPORT_ERROR})" if PPTX_IMPORT_ERROR else ""
+        raise ImportError("python-pptx is not available" + detail)
+
+    # Import util symbols lazily; some environments may import Presentation but
+    # fail later due to optional dependencies.
+    try:
+        from pptx.util import Inches as PptxInches, Pt
+    except Exception as e:
+        raise ImportError(f"python-pptx is installed but missing required utilities: {type(e).__name__}: {e}")
 
     # Load template or create new presentation
     if os.path.exists(template_path):
         prs = Presentation(template_path)
-        print(f"📊 Loading PowerPoint template: {template_path}")
+        print(f"[PowerPoint] Loading template: {template_path}")
     else:
         prs = Presentation()
-        print("📊 Creating new PowerPoint presentation (template not found)")
+        print("[PowerPoint] Creating new presentation (template not found)")
 
     # Helper functions
     def _fmt_currency(v):
@@ -1808,7 +1858,7 @@ def build_investor_report_pptx(
 
     # Save the presentation
     prs.save(out_path)
-    print(f"✅ PowerPoint report saved: {out_path}")
+    print(f"[OK] PowerPoint report saved: {out_path}")
     return out_path
 
 
@@ -1817,7 +1867,7 @@ def generate_full_investor_report(excel_path: str) -> Dict[str, Any]:
     Main orchestration function - coordinates all agents to generate investor report
     """
     print("="*80)
-    print("🤖 INTELLIGENT MULTI-AGENT SYSTEM")
+    print("INTELLIGENT MULTI-AGENT SYSTEM")
     print("="*80)
 
     # Initialize all agents
@@ -1877,7 +1927,7 @@ def generate_full_investor_report(excel_path: str) -> Dict[str, Any]:
         pptx_path = None
 
     print("="*80)
-    print("✅ REPORT GENERATION COMPLETE")
+    print("[OK] REPORT GENERATION COMPLETE")
     print("="*80)
 
     return {

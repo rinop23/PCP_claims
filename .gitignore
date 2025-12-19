@@ -38,12 +38,16 @@ env/
 # Sensitive Files - DO NOT COMMIT
 .env
 .env.local
+.streamlit/secrets.toml
 *.key
 *.pem
 config.json
 secrets.json
 credentials.json
 api_keys.txt
+
+# Accidental artifacts
+nul
 
 # Uploaded Files and Data
 uploads/
