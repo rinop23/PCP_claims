@@ -445,7 +445,9 @@ class InvestorReportAgent(BaseAgent):
         net_proceeds = dba_proceeds - total_costs
         funder_return = net_proceeds * (funder_pct / 100) if net_proceeds > 0 else 0
         firm_return = net_proceeds * (firm_pct / 100) if net_proceeds > 0 else 0
-        roi = (funder_return / total_costs * 100) if total_costs > 0 else 0
+        # ROI = (Return - Investment) / Investment * 100
+        # MOIC = Return / Investment
+        roi = ((funder_return - total_costs) / total_costs * 100) if total_costs > 0 else 0
         moic = (funder_return / total_costs) if total_costs > 0 else 0
 
         # Pre-calculated values to inject into prompt

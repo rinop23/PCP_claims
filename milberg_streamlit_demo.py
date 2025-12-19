@@ -267,7 +267,9 @@ else:
             'net_proceeds': net_proceeds,
             'funder_return': funder_return,
             'firm_return': firm_return,
-            'roi': (funder_return / total_costs * 100) if total_costs > 0 else 0,
+            # ROI = (Return - Investment) / Investment * 100
+            # MOIC = Return / Investment
+            'roi': ((funder_return - total_costs) / total_costs * 100) if total_costs > 0 else 0,
             'moic': (funder_return / total_costs) if total_costs > 0 else 0
         }
 
