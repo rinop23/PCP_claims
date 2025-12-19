@@ -77,11 +77,12 @@ st.markdown("""
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
 
+# Store password hashes only (no plaintext passwords committed).
 USERS = {
-    "admin": hash_password("Admin123!"),
-    "walter": hash_password("Walter123!"),
-    "dirk": hash_password("Dirk123!"),
-    "eda": hash_password("Eda123!")
+    "admin": "3eb3fe66b31e3b4d10fa70b5cad49c7112294af6ae4e476a1c405155d45aa121",
+    "walter": "94439b2e9a330c29ca553d5a84eefdb8da96a03261dfdc5912141993d7a50a9c",
+    "dirk": "e3e49db134ba0787f2e6fd6708b964023a3d21a8ee1798ae8d16a5b33c3bb15b",
+    "eda": "ab4f5071918e31f449a33be62f2581816137b7045d4faf69594f70611a966b77",
 }
 
 def check_login(username: str, password: str) -> bool:

@@ -152,18 +152,14 @@ Intelligent multi-agent system for analyzing PCP (Personal Contract Purchase) cl
 
 ```
 pcp_AGI_system/
-├── intelligent_agents.py          # 4 AI agents (698 lines)
-├── milberg_streamlit_demo.py      # Dashboard with visualizations (758 lines)
-├── requirements.txt                # Dependencies
-├── README.md                       # This file
-├── DOCS/
-│   └── Priorities Deed (EV 9 October 2025).docx
-├── FCA redress scheme/
-│   └── Redress Scheme.pdf
-└── uploads/                        # Excel file uploads
+├── milberg_streamlit_demo.py      # Streamlit app entrypoint
+├── intelligent_agents.py          # Agent orchestration + report builders
+├── requirements.txt               # Python dependencies (Streamlit Cloud)
+├── packages.txt                   # System packages (Chromium for kaleido)
+├── postBuild / postBuild.sh       # Streamlit Cloud hooks
+├── runtime.txt                    # Python runtime pin
+└── uploads/                       # Local uploads (ignored in git)
 ```
-
-**Total:** 2 Python files, 1,456 lines of code
 
 ---
 
@@ -209,13 +205,10 @@ streamlit run milberg_streamlit_demo.py
 
 ## 🔐 Authentication
 
-**Built-in user accounts:**
-- `admin` / `Admin123!`
-- `walter` / `Walter123!`
-- `dirk` / `Dirk123!`
-- `eda` / `Eda123!`
+This app includes a simple username/password gate.
 
-Passwords are hashed with SHA-256.
+- Usernames and password hashes are configured in the app code (no plaintext passwords are committed).
+- For Streamlit Community Cloud, prefer managing secrets in Streamlit settings rather than committing credentials.
 
 ---
 
