@@ -414,19 +414,93 @@ class InvestorReportAgent(BaseAgent):
 
         print("📝 Investor Report Agent: Generating comprehensive report...")
 
+        # Pre-calculate key financial metrics to ensure accuracy
+        pm = monthly_data.get('portfolio_metrics', {})
+        fm = monthly_data.get('financial_metrics', {})
+        lenders = monthly_data.get('lender_distribution', [])
+        pipeline = monthly_data.get('pipeline', {})
+
+        # Get total settlement value - try multiple sources
+        total_settlement = pm.get('total_settlement_value', 0)
+        if total_settlement == 0 and lenders:
+            total_settlement = sum(l.get('estimated_value', 0) for l in lenders)
+
+        # Get profit split rules
+        dba_rate = 30  # Default 30%
+        funder_pct = 80  # Default 80%
+        firm_pct = 20  # Default 20%
+
+        if profit_rules:
+            dba_info = profit_rules.get('dba_rate', {})
+            if isinstance(dba_info, dict):
+                dba_rate = dba_info.get('percentage_of_settlement', 30)
+            split_info = profit_rules.get('profit_split', {})
+            if isinstance(split_info, dict):
+                funder_pct = split_info.get('funder_percentage', 80)
+                firm_pct = split_info.get('law_firm_percentage', 20)
+
+        # Calculate financials
+        dba_proceeds = total_settlement * (dba_rate / 100)
+        total_costs = fm.get('total_costs', 0)
+        net_proceeds = dba_proceeds - total_costs
+        funder_return = net_proceeds * (funder_pct / 100) if net_proceeds > 0 else 0
+        firm_return = net_proceeds * (firm_pct / 100) if net_proceeds > 0 else 0
+        roi = (funder_return / total_costs * 100) if total_costs > 0 else 0
+        moic = (funder_return / total_costs) if total_costs > 0 else 0
+
+        # Pre-calculated values to inject into prompt
+        pre_calculated = {
+            "total_settlement_value": total_settlement,
+            "dba_rate": dba_rate,
+            "dba_proceeds": dba_proceeds,
+            "total_costs": total_costs,
+            "net_proceeds": net_proceeds,
+            "funder_return": funder_return,
+            "firm_return": firm_return,
+            "funder_percentage": funder_pct,
+            "firm_percentage": firm_pct,
+            "roi": roi,
+            "moic": moic,
+            "total_claims": pm.get('unique_claims', 0),
+            "total_clients": pm.get('unique_clients', 0),
+            "total_lenders": len(lenders),
+            "pipeline_value": sum(stage.get('value', 0) for stage in pipeline.values() if isinstance(stage, dict))
+        }
+
+        print(f"   Pre-calculated: settlement=£{total_settlement:,.0f}, DBA=£{dba_proceeds:,.0f}, net=£{net_proceeds:,.0f}")
+
         system_prompt = """You are a senior investment analyst creating monthly investor reports for litigation funding stakeholders.
-Generate factual, data-driven analysis WITHOUT opinions. Focus on metrics, trends, and objective observations."""
+Generate factual, data-driven analysis. Include detailed analysis for each section matching the dashboard tabs:
+1. Lenders - concentration analysis, top lenders, diversification
+2. Economic Analysis - revenue, costs, profit distribution, ROI
+3. Compliance & Pipeline - FCA compliance, pipeline stages, bottlenecks
+4. Portfolio Analysis - growth metrics, risk assessment, forecasting"""
 
         user_prompt = f"""Create a comprehensive monthly investor report using these inputs:
 
 MONTHLY REPORT DATA:
 {json.dumps(monthly_data, indent=2)}
 
+PRE-CALCULATED FINANCIALS (USE THESE EXACT VALUES):
+{json.dumps(pre_calculated, indent=2)}
+
 PROFIT DISTRIBUTION RULES (from Priority Deed):
 {json.dumps(profit_rules, indent=2)}
 
 FCA COMPLIANCE RULES (from Redress Scheme):
 {json.dumps(compliance_rules, indent=2)}
+
+CRITICAL INSTRUCTIONS:
+1. Use the PRE-CALCULATED FINANCIALS values - DO NOT recalculate
+2. total_settlements = {total_settlement} (the total portfolio value)
+3. dba_proceeds_expected = {dba_proceeds:.2f} (30% of settlements)
+4. total_costs_incurred = {total_costs:.2f}
+5. net_proceeds_after_costs = {net_proceeds:.2f}
+6. funder_expected_return = {funder_return:.2f} ({funder_pct}% of net)
+7. firm_expected_return = {firm_return:.2f} ({firm_pct}% of net)
+8. total_claims = {pre_calculated['total_claims']}
+9. total_clients = {pre_calculated['total_clients']}
+10. total_portfolio_value = {total_settlement}
 
 Generate a structured investor report in JSON format:
 {{
