@@ -92,6 +92,10 @@ if 'investor_report_docx_bytes' not in st.session_state:
     st.session_state.investor_report_docx_bytes = None
 if 'investor_report_docx_path' not in st.session_state:
     st.session_state.investor_report_docx_path = None
+if 'investor_report_pptx_bytes' not in st.session_state:
+    st.session_state.investor_report_pptx_bytes = None
+if 'investor_report_pptx_path' not in st.session_state:
+    st.session_state.investor_report_pptx_path = None
 if 'last_uploaded_excel_path' not in st.session_state:
     st.session_state.last_uploaded_excel_path = None
 
@@ -278,7 +282,7 @@ else:
         # NEW: Monthly Investor Report (OpenAI Agent)
         st.subheader("📄 Monthly Investor Report")
 
-        col_r1, col_r2, col_r3 = st.columns([1, 1, 2])
+        col_r1, col_r2, col_r3, col_r4 = st.columns([1, 1, 1, 1])
 
         with col_r1:
             generate_clicked = st.button("🧠 Generate Investor Report", type="primary")
@@ -286,16 +290,28 @@ else:
         with col_r2:
             if st.session_state.investor_report_docx_bytes:
                 st.download_button(
-                    label="⬇️ Download Report (Word)",
+                    label="⬇️ Word Report",
                     data=st.session_state.investor_report_docx_bytes,
                     file_name=os.path.basename(st.session_state.investor_report_docx_path or "monthly_investor_report.docx"),
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     use_container_width=True,
                 )
             else:
-                st.caption("Generate the report to enable download")
+                st.caption("Generate to enable Word download")
 
         with col_r3:
+            if st.session_state.investor_report_pptx_bytes:
+                st.download_button(
+                    label="⬇️ PowerPoint Report",
+                    data=st.session_state.investor_report_pptx_bytes,
+                    file_name=os.path.basename(st.session_state.investor_report_pptx_path or "monthly_investor_report.pptx"),
+                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    use_container_width=True,
+                )
+            else:
+                st.caption("Generate to enable PPTX download")
+
+        with col_r4:
             import sys
             st.caption(
                 "Uses the bundled OpenAI multi-agent system (`intelligent_agents.generate_full_investor_report`). "
@@ -358,6 +374,13 @@ else:
 
                             # Persist path for compatibility
                             st.session_state.investor_report_path = docx_path
+
+                            # Load PowerPoint report if available
+                            pptx_path = result.get("pptx_report_path")
+                            if pptx_path and os.path.exists(pptx_path):
+                                with open(pptx_path, "rb") as f:
+                                    st.session_state.investor_report_pptx_bytes = f.read()
+                                st.session_state.investor_report_pptx_path = pptx_path
 
                         st.success("Investor report generated.")
 

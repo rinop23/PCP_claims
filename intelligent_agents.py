@@ -1,6 +1,7 @@
 """
 Intelligent Multi-Agent System for PCP Claims Analysis
 4 Specialized Agents working together to generate investor reports
+Now includes Investor Relations Agent for PowerPoint generation
 """
 
 import os
@@ -11,6 +12,18 @@ import pandas as pd
 from docx import Document
 from docx.shared import Inches
 import PyPDF2
+
+# PowerPoint imports
+try:
+    from pptx import Presentation
+    from pptx.util import Inches as PptxInches, Pt
+    from pptx.dml.color import RgbColor
+    from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+    from pptx.enum.shapes import MSO_SHAPE
+    PPTX_AVAILABLE = True
+except ImportError:
+    PPTX_AVAILABLE = False
+    Presentation = None
 
 
 class BaseAgent:
@@ -1503,6 +1516,313 @@ def build_investor_report_docx(
     return out_path
 
 
+def build_investor_report_pptx(
+    *,
+    out_path: str,
+    template_path: str = "reports/Monthly_Investor_Reporting_Dec 2025.pptx",
+    monthly_data: Dict[str, Any],
+    investor_report: Dict[str, Any],
+) -> str:
+    """
+    Create a PowerPoint investor report using the template.
+    Each slide contains data tables and relevant charts organized together.
+    """
+    if not PPTX_AVAILABLE:
+        raise ImportError("python-pptx is not installed. Install with: pip install python-pptx")
+
+    # Load template or create new presentation
+    if os.path.exists(template_path):
+        prs = Presentation(template_path)
+        print(f"📊 Loading PowerPoint template: {template_path}")
+    else:
+        prs = Presentation()
+        print("📊 Creating new PowerPoint presentation (template not found)")
+
+    # Helper functions
+    def _fmt_currency(v):
+        if v is None or v == "N/A":
+            return "N/A"
+        try:
+            return f"£{float(v):,.0f}"
+        except (ValueError, TypeError):
+            return str(v)
+
+    def _fmt_pct(v):
+        if v is None or v == "N/A":
+            return "N/A"
+        try:
+            return f"{float(v):.1f}%"
+        except (ValueError, TypeError):
+            return str(v)
+
+    def _fmt_num(v):
+        if v is None or v == "N/A":
+            return "N/A"
+        try:
+            return f"{int(float(v)):,}"
+        except (ValueError, TypeError):
+            return str(v)
+
+    def add_title_slide(title: str, subtitle: str):
+        """Add a title slide"""
+        slide_layout = prs.slide_layouts[0]  # Title Slide
+        slide = prs.slides.add_slide(slide_layout)
+        slide.shapes.title.text = title
+        if len(slide.placeholders) > 1:
+            slide.placeholders[1].text = subtitle
+        return slide
+
+    def add_content_slide(title: str):
+        """Add a content slide with title"""
+        slide_layout = prs.slide_layouts[5]  # Title Only
+        slide = prs.slides.add_slide(slide_layout)
+        slide.shapes.title.text = title
+        return slide
+
+    def add_table_to_slide(slide, headers: List[str], rows: List[List[str]],
+                           left: float, top: float, width: float, height: float):
+        """Add a table to a slide"""
+        table_shape = slide.shapes.add_table(
+            len(rows) + 1, len(headers),
+            PptxInches(left), PptxInches(top),
+            PptxInches(width), PptxInches(height)
+        )
+        table = table_shape.table
+
+        # Style header row
+        for i, header in enumerate(headers):
+            cell = table.cell(0, i)
+            cell.text = str(header)
+            cell.text_frame.paragraphs[0].font.bold = True
+            cell.text_frame.paragraphs[0].font.size = Pt(10)
+
+        # Add data rows
+        for row_idx, row_data in enumerate(rows):
+            for col_idx, cell_val in enumerate(row_data):
+                cell = table.cell(row_idx + 1, col_idx)
+                cell.text = str(cell_val) if cell_val is not None else "N/A"
+                cell.text_frame.paragraphs[0].font.size = Pt(9)
+
+        return table_shape
+
+    def add_text_box(slide, text: str, left: float, top: float, width: float, height: float,
+                     font_size: int = 11, bold: bool = False):
+        """Add a text box to a slide"""
+        textbox = slide.shapes.add_textbox(
+            PptxInches(left), PptxInches(top),
+            PptxInches(width), PptxInches(height)
+        )
+        tf = textbox.text_frame
+        tf.word_wrap = True
+        p = tf.paragraphs[0]
+        p.text = text
+        p.font.size = Pt(font_size)
+        p.font.bold = bold
+        return textbox
+
+    def add_chart_image(slide, fig, left: float, top: float, width: float):
+        """Add a Plotly chart as an image to a slide"""
+        try:
+            png, err = _export_plotly_fig_to_png_bytes_with_error(fig)
+            if not png or err:
+                return None
+
+            # Save to temp file
+            tmp_dir = os.path.join(os.path.dirname(out_path), ".tmp_pptx_assets")
+            os.makedirs(tmp_dir, exist_ok=True)
+            img_path = os.path.join(tmp_dir, f"chart_{id(fig)}.png")
+
+            with open(img_path, "wb") as f:
+                f.write(png)
+
+            slide.shapes.add_picture(img_path, PptxInches(left), PptxInches(top), width=PptxInches(width))
+            return True
+        except Exception as e:
+            print(f"Warning: Could not add chart to slide: {e}")
+            return None
+
+    # Get report data
+    exec_sum = (investor_report or {}).get("executive_summary") or {}
+    perf = (investor_report or {}).get("portfolio_performance") or {}
+    fin = (investor_report or {}).get("financial_analysis") or {}
+    comp = (investor_report or {}).get("compliance_assessment") or {}
+    risk = (investor_report or {}).get("risk_assessment") or {}
+    lender_conc = (investor_report or {}).get("lender_concentration") or {}
+    pipeline_analysis = (investor_report or {}).get("pipeline_analysis") or {}
+    cost_eff = (investor_report or {}).get("cost_efficiency") or {}
+    fcst = (investor_report or {}).get("forecasting") or {}
+
+    # Get raw monthly data
+    lenders = (monthly_data or {}).get("lender_distribution") or []
+    pipeline = (monthly_data or {}).get("pipeline") or {}
+    pm = (monthly_data or {}).get("portfolio_metrics") or {}
+    fm = (monthly_data or {}).get("financial_metrics") or {}
+
+    period = exec_sum.get("reporting_period") or "Monthly Report"
+
+    # Build charts
+    figs = _build_dashboard_figures(monthly_data, investor_report)
+
+    # ==================== SLIDE 1: EXECUTIVE SUMMARY ====================
+    slide1 = add_content_slide(f"Executive Summary - {period}")
+
+    # Key metrics table (left side)
+    key_metrics = [
+        ["Total Claims", _fmt_num(perf.get("total_claims") or pm.get("unique_claims", 0))],
+        ["Total Clients", _fmt_num(perf.get("total_clients") or pm.get("unique_clients", 0))],
+        ["Total Lenders", _fmt_num(len(lenders))],
+        ["Portfolio Value", _fmt_currency(perf.get("total_portfolio_value") or pm.get("total_settlement_value", 0))],
+        ["Funder Return (80%)", _fmt_currency(fin.get("funder_expected_return"))],
+        ["MOIC", f"{fin.get('moic_projection', 0):.2f}x" if fin.get('moic_projection') else "N/A"],
+        ["ROI", _fmt_pct(fin.get("roi_projection"))],
+        ["Compliance Status", (comp.get("fca_compliance_status") or "N/A").upper()],
+    ]
+    add_table_to_slide(slide1, ["Metric", "Value"], key_metrics, 0.5, 1.3, 4.5, 3.5)
+
+    # Key highlights (right side)
+    highlights_text = "Key Highlights:\n"
+    for metric in exec_sum.get("key_metrics_summary", [])[:5]:
+        highlights_text += f"• {metric}\n"
+    if exec_sum.get("critical_updates"):
+        highlights_text += "\nCritical Updates:\n"
+        for update in exec_sum.get("critical_updates", [])[:3]:
+            highlights_text += f"• {update}\n"
+    add_text_box(slide1, highlights_text, 5.5, 1.3, 7.5, 4.0, font_size=10)
+
+    # ==================== SLIDE 2: ECONOMIC ANALYSIS ====================
+    slide2 = add_content_slide("Economic Analysis & Profit Distribution")
+
+    # Financial summary table (left side)
+    financial_rows = [
+        ["Total Settlement Value", _fmt_currency(fin.get("total_settlements"))],
+        ["DBA Proceeds (30%)", _fmt_currency(fin.get("dba_proceeds_expected"))],
+        ["Total Costs Incurred", _fmt_currency(fin.get("total_costs_incurred"))],
+        ["Funder Return (80% of DBA)", _fmt_currency(fin.get("funder_expected_return"))],
+        ["Firm Return (20% of DBA)", _fmt_currency(fin.get("firm_expected_return"))],
+        ["ROI Projection", _fmt_pct(fin.get("roi_projection"))],
+        ["MOIC Projection", f"{fin.get('moic_projection', 0):.2f}x" if fin.get('moic_projection') else "N/A"],
+    ]
+    add_table_to_slide(slide2, ["Metric", "Value"], financial_rows, 0.3, 1.2, 4.5, 3.0)
+
+    # Cost breakdown table (below financial)
+    cost_rows = [
+        ["Acquisition Cost", _fmt_currency(fm.get("acquisition_cost", 0))],
+        ["Submission Cost", _fmt_currency(fm.get("submission_cost", 0))],
+        ["Total Costs", _fmt_currency(fm.get("total_costs", 0))],
+        ["Cost per Claim", _fmt_currency(cost_eff.get("cost_per_claim") or fm.get("cost_per_claim", 0))],
+    ]
+    add_table_to_slide(slide2, ["Cost Category", "Amount"], cost_rows, 0.3, 4.5, 4.5, 1.8)
+
+    # Profit split chart (right side)
+    if figs.get("profit_split"):
+        add_chart_image(slide2, figs["profit_split"], 5.2, 1.2, 7.5)
+
+    # ==================== SLIDE 3: COMPLIANCE & PIPELINE ====================
+    slide3 = add_content_slide("Compliance & Pipeline Status")
+
+    # Compliance assessment (top left)
+    compliance_rows = [
+        ["Compliance Status", (comp.get("fca_compliance_status") or "N/A").upper()],
+        ["Claims at Risk", _fmt_num(comp.get("claims_at_risk", 0))],
+    ]
+    add_table_to_slide(slide3, ["Metric", "Value"], compliance_rows, 0.3, 1.2, 3.5, 0.9)
+
+    # Compliance actions (below)
+    if comp.get("compliance_actions_needed"):
+        actions_text = "Actions Required:\n"
+        for action in comp.get("compliance_actions_needed", [])[:4]:
+            actions_text += f"• {action[:60]}...\n" if len(action) > 60 else f"• {action}\n"
+        add_text_box(slide3, actions_text, 0.3, 2.3, 4.5, 1.5, font_size=9)
+
+    # Pipeline breakdown table (left side, lower)
+    pipeline_stages = [
+        ("Awaiting DSAR", pipeline.get("awaiting_dsar", {})),
+        ("Pending Submission", pipeline.get("pending_submission", {})),
+        ("Under Review", pipeline.get("under_review", {})),
+        ("Settlement Offered", pipeline.get("settlement_offered", {})),
+        ("Paid", pipeline.get("paid", {})),
+    ]
+    pipeline_rows = []
+    total_count = 0
+    total_value = 0
+    for stage_name, stage_data in pipeline_stages:
+        count = stage_data.get("count", 0) if isinstance(stage_data, dict) else 0
+        value = stage_data.get("value", 0) if isinstance(stage_data, dict) else 0
+        total_count += count
+        total_value += value
+        pipeline_rows.append([stage_name, _fmt_num(count), _fmt_currency(value)])
+    pipeline_rows.append(["TOTAL", _fmt_num(total_count), _fmt_currency(total_value)])
+
+    add_table_to_slide(slide3, ["Pipeline Stage", "Count", "Value"], pipeline_rows, 0.3, 4.0, 4.5, 2.5)
+
+    # Pipeline funnel chart (right side)
+    if figs.get("pipeline_funnel"):
+        add_chart_image(slide3, figs["pipeline_funnel"], 5.2, 1.2, 7.5)
+
+    # ==================== SLIDE 4: PORTFOLIO ANALYSIS ====================
+    slide4 = add_content_slide("Portfolio Analysis & Forecasting")
+
+    # Portfolio metrics table (left side)
+    portfolio_rows = [
+        ["Total Claims", _fmt_num(perf.get("total_claims") or pm.get("unique_claims", 0))],
+        ["Total Clients", _fmt_num(perf.get("total_clients") or pm.get("unique_clients", 0))],
+        ["Claims Submitted", _fmt_num(pm.get("claims_submitted", 0))],
+        ["Claims Successful", _fmt_num(pm.get("claims_successful", 0))],
+        ["Claims Rejected", _fmt_num(pm.get("claims_rejected", 0))],
+        ["Success Rate", _fmt_pct(perf.get("success_rate") or pm.get("success_rate", 0))],
+        ["Avg Claim Value", _fmt_currency(perf.get("average_settlement") or pm.get("avg_claim_value", 0))],
+    ]
+    add_table_to_slide(slide4, ["Metric", "Value"], portfolio_rows, 0.3, 1.2, 4.0, 3.0)
+
+    # Risk assessment (below portfolio)
+    risk_text = f"Risk Level: {(risk.get('risk_level') or 'N/A').upper()}\n\n"
+    if risk.get("key_risks"):
+        risk_text += "Key Risks:\n"
+        for r in risk.get("key_risks", [])[:3]:
+            risk_text += f"• {r[:50]}...\n" if len(r) > 50 else f"• {r}\n"
+    add_text_box(slide4, risk_text, 0.3, 4.4, 4.5, 2.0, font_size=9)
+
+    # Forecasting table (right side top)
+    forecast_data = (monthly_data or {}).get("forecasting") or {}
+    forecast_rows = [
+        ["Expected New Clients", _fmt_num(forecast_data.get("expected_new_clients", 0))],
+        ["Expected Submissions", _fmt_num(forecast_data.get("expected_submissions", 0))],
+        ["Expected Settlement (90 days)", _fmt_currency(fcst.get("expected_settlements_next_90_days", 0))],
+    ]
+    add_table_to_slide(slide4, ["Projection", "Value"], forecast_rows, 5.0, 1.2, 4.5, 1.5)
+
+    # Quarterly outlook
+    if fcst.get("quarterly_outlook"):
+        outlook_text = f"Quarterly Outlook:\n{fcst.get('quarterly_outlook')}"
+        add_text_box(slide4, outlook_text, 5.0, 2.9, 7.5, 1.5, font_size=10)
+
+    # Lenders value bar chart (right side bottom)
+    if figs.get("lenders_value_bar"):
+        add_chart_image(slide4, figs["lenders_value_bar"], 5.0, 4.0, 7.5)
+
+    # ==================== SLIDE 5: ACTION ITEMS ====================
+    action_items = (investor_report or {}).get("action_items") or []
+    if action_items:
+        slide5 = add_content_slide("Action Items")
+
+        action_rows = []
+        for item in action_items[:8]:  # Limit to 8 items
+            item = item or {}
+            action_rows.append([
+                (item.get('priority') or 'N/A').upper(),
+                item.get('action', 'N/A')[:40] + "..." if len(item.get('action', '')) > 40 else item.get('action', 'N/A'),
+                item.get('owner', 'N/A'),
+                item.get('deadline', 'N/A')
+            ])
+
+        add_table_to_slide(slide5, ["Priority", "Action", "Owner", "Deadline"], action_rows, 0.5, 1.3, 12.0, 4.5)
+
+    # Save the presentation
+    prs.save(out_path)
+    print(f"✅ PowerPoint report saved: {out_path}")
+    return out_path
+
+
 def generate_full_investor_report(excel_path: str) -> Dict[str, Any]:
     """
     Main orchestration function - coordinates all agents to generate investor report
@@ -1533,10 +1853,12 @@ def generate_full_investor_report(excel_path: str) -> Dict[str, Any]:
         compliance_rules=compliance_rules
     )
 
-    # Build DOCX report on disk
+    # Build reports on disk
     os.makedirs("reports", exist_ok=True)
     period = (monthly_data or {}).get("reporting_period") or "Report"
     safe_period = str(period).replace("/", "-").replace("\\", "-").replace(":", "-")
+
+    # Build DOCX report
     docx_path = os.path.join("reports", f"Investor_Report_{safe_period}.docx")
     try:
         build_investor_report_docx(
@@ -1546,9 +1868,24 @@ def generate_full_investor_report(excel_path: str) -> Dict[str, Any]:
             investor_report=report.get("report_data") or {},
         )
     except Exception as e:
-        # Keep generation robust; downstream UI can show charts warning
         print(f"Warning: DOCX report generation failed: {e}")
         docx_path = None
+
+    # Build PowerPoint report
+    pptx_path = os.path.join("reports", f"Investor_Report_{safe_period}.pptx")
+    try:
+        if PPTX_AVAILABLE:
+            build_investor_report_pptx(
+                out_path=pptx_path,
+                monthly_data=monthly_data,
+                investor_report=report.get("report_data") or {},
+            )
+        else:
+            print("Warning: python-pptx not available, skipping PowerPoint generation")
+            pptx_path = None
+    except Exception as e:
+        print(f"Warning: PowerPoint report generation failed: {e}")
+        pptx_path = None
 
     print("="*80)
     print("✅ REPORT GENERATION COMPLETE")
@@ -1561,6 +1898,7 @@ def generate_full_investor_report(excel_path: str) -> Dict[str, Any]:
         "investor_report": report["report_data"],
         "markdown_report": report["markdown_report"],
         "docx_report_path": docx_path,
+        "pptx_report_path": pptx_path,
     }
 
 
