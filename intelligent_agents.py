@@ -586,6 +586,9 @@ IMPORTANT:
 
         report_data = self.call_openai(system_prompt, user_prompt, "json", max_tokens=16000)
 
+        # POST-PROCESS: Force correct financial values (OpenAI sometimes ignores our pre-calculated values)
+        report_data = self._force_correct_financials(report_data, pre_calculated)
+
         # Generate markdown version for display
         markdown_report = self._format_as_markdown(report_data)
 
@@ -599,6 +602,44 @@ IMPORTANT:
             "markdown_report": markdown_report,
             "narrative": narrative,
         }
+
+    def _force_correct_financials(self, report_data: Dict[str, Any], pre_calculated: Dict[str, Any]) -> Dict[str, Any]:
+        """Force correct financial values in the report data (overwrite any incorrect OpenAI values)"""
+
+        # Force correct portfolio_performance values
+        if 'portfolio_performance' not in report_data:
+            report_data['portfolio_performance'] = {}
+        pp = report_data['portfolio_performance']
+        pp['total_claims'] = pre_calculated.get('total_claims', pp.get('total_claims', 0))
+        pp['total_clients'] = pre_calculated.get('total_clients', pp.get('total_clients', 0))
+        pp['total_portfolio_value'] = pre_calculated.get('total_settlement_value', pp.get('total_portfolio_value', 0))
+
+        # Force correct financial_analysis values
+        if 'financial_analysis' not in report_data:
+            report_data['financial_analysis'] = {}
+        fa = report_data['financial_analysis']
+        fa['total_settlements'] = pre_calculated.get('total_settlement_value', 0)
+        fa['dba_proceeds_expected'] = pre_calculated.get('dba_proceeds', 0)
+        fa['total_costs_incurred'] = pre_calculated.get('total_costs', 0)
+        fa['net_proceeds_after_costs'] = pre_calculated.get('net_proceeds', 0)
+        fa['funder_expected_return'] = pre_calculated.get('funder_return', 0)
+        fa['firm_expected_return'] = pre_calculated.get('firm_return', 0)
+        fa['roi_projection'] = pre_calculated.get('roi', 0)
+        fa['moic_projection'] = pre_calculated.get('moic', 0)
+
+        # Force lender concentration
+        if 'lender_concentration' not in report_data:
+            report_data['lender_concentration'] = {}
+        report_data['lender_concentration']['total_lenders'] = pre_calculated.get('total_lenders', 0)
+
+        # Force pipeline value
+        if 'pipeline_analysis' not in report_data:
+            report_data['pipeline_analysis'] = {}
+        report_data['pipeline_analysis']['pipeline_value'] = pre_calculated.get('pipeline_value', 0)
+
+        print(f"   Forced financials: settlements=£{fa['total_settlements']:,.0f}, DBA=£{fa['dba_proceeds_expected']:,.0f}, net=£{fa['net_proceeds_after_costs']:,.0f}")
+
+        return report_data
 
     def _generate_short_narrative(self, report_data: Dict[str, Any]) -> str:
         """Generate brief narrative lines to explain the data (kept short and factual)."""
