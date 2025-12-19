@@ -1,4 +1,5 @@
 # Core Dependencies for PCP Claims Analysis System
+# Updated: 2025-12-19 - Added python-pptx for PowerPoint generation
 
 # Web Framework
 streamlit==1.52.1
