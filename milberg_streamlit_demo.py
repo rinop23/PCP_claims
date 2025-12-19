@@ -1,6 +1,6 @@
 """
-Milberg PCP Claims Dashboard - Data Visualization Focused
-Shows ACTUAL numbers and graphs, not AI summaries
+Milberg PCP Claims Dashboard - Unified Intelligent Agent System
+Uses OpenAI-powered agents for consistent data extraction and report generation
 """
 
 import streamlit as st
@@ -10,14 +10,22 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import os
 import hashlib
-from data_extractor import extract_monthly_report_data, read_priority_deed_rules, calculate_financial_projections
 from datetime import datetime
 
-# NEW: OpenAI agent-based investor report generation
+# Import the unified intelligent agent system
 try:
-    from intelligent_agents import generate_full_investor_report
-except Exception:
+    from intelligent_agents import (
+        generate_full_investor_report,
+        MonthlyReportAgent,
+        PriorityDeedAgent
+    )
+    AGENTS_AVAILABLE = True
+except Exception as e:
+    print(f"Warning: Could not import intelligent_agents: {e}")
+    AGENTS_AVAILABLE = False
     generate_full_investor_report = None
+    MonthlyReportAgent = None
+    PriorityDeedAgent = None
 
 # Page config
 st.set_page_config(
@@ -118,37 +126,84 @@ else:
         # Track latest upload path for report generation
         st.session_state.last_uploaded_excel_path = temp_path
 
-        if st.button("📊 Load Data", type="primary"):
-            with st.spinner("Loading data from Excel..."):
-                import sys
-                from io import StringIO
+        if st.button("📊 Load Data with AI Agent", type="primary"):
+            if not AGENTS_AVAILABLE:
+                st.error("Intelligent agent system not available. Check that intelligent_agents.py is properly configured.")
+            else:
+                with st.spinner("🤖 AI Agent analyzing Excel report..."):
+                    import sys
+                    from io import StringIO
 
-                # Capture print output for debugging
-                old_stdout = sys.stdout
-                sys.stdout = captured_output = StringIO()
+                    # Capture print output for debugging
+                    old_stdout = sys.stdout
+                    sys.stdout = captured_output = StringIO()
 
-                try:
-                    st.session_state.data = extract_monthly_report_data(temp_path)
+                    try:
+                        # Use the MonthlyReportAgent for consistent extraction
+                        agent = MonthlyReportAgent()
+                        monthly_data = agent.analyze_monthly_report(temp_path)
 
-                    # Get captured debug output
-                    debug_output = captured_output.getvalue()
-                    sys.stdout = old_stdout
+                        # Convert agent output to dashboard format
+                        pm = monthly_data.get('portfolio_metrics', {})
+                        lenders = monthly_data.get('lender_distribution', [])
+                        pipeline = monthly_data.get('pipeline', {})
+                        fm = monthly_data.get('financial_metrics', {})
 
-                    # Store debug output in session state
-                    st.session_state.debug_output = debug_output
+                        # Calculate totals from lenders if needed
+                        total_claims = pm.get('unique_claims', 0)
+                        total_value = pm.get('total_settlement_value', 0)
+                        if total_value == 0 and lenders:
+                            total_value = sum(l.get('estimated_value', 0) for l in lenders)
+                        if total_claims == 0 and lenders:
+                            total_claims = sum(l.get('num_claims', 0) for l in lenders)
 
-                    st.success("Data loaded successfully!")
+                        # Structure data for dashboard
+                        st.session_state.data = {
+                            'portfolio_metrics': {
+                                'unique_clients_cumulative': pm.get('unique_clients', 0),
+                                'unique_claims_cumulative': pm.get('unique_claims', 0),
+                                'claims_submitted': pm.get('claims_submitted', 0),
+                                'claims_successful': pm.get('claims_successful', 0),
+                                'claims_rejected': pm.get('claims_rejected', 0),
+                                'avg_claim_value': pm.get('avg_claim_value', 0),
+                                'success_rate': pm.get('success_rate', 0)
+                            },
+                            'lender_distribution': lenders,
+                            'pipeline': pipeline,
+                            'financial_costs': {
+                                'total_costs': fm.get('total_costs', 0),
+                                'acquisition_cost_cumulative': fm.get('acquisition_cost', 0),
+                                'submission_cost_cumulative': fm.get('submission_cost', 0),
+                                'cost_per_claim': fm.get('cost_per_claim', 0)
+                            },
+                            'portfolio_totals': {
+                                'total_claims': total_claims,
+                                'total_estimated_value': total_value
+                            },
+                            'reporting_period': monthly_data.get('reporting_period', 'Monthly Report'),
+                            # Store raw agent data for report generation
+                            '_agent_monthly_data': monthly_data
+                        }
 
-                    # Show debug info in expander
-                    if debug_output:
-                        with st.expander("🔍 Debug Information (for troubleshooting)"):
-                            st.code(debug_output)
+                        # Get captured debug output
+                        debug_output = captured_output.getvalue()
+                        sys.stdout = old_stdout
 
-                    st.rerun()
-                except Exception as e:
-                    sys.stdout = old_stdout
-                    st.error(f"Error loading data: {e}")
-                    st.exception(e)
+                        # Store debug output in session state
+                        st.session_state.debug_output = debug_output
+
+                        st.success(f"✅ AI Agent extracted data: {total_claims} claims, {len(lenders)} lenders, £{total_value:,.0f} portfolio value")
+
+                        # Show debug info in expander
+                        if debug_output:
+                            with st.expander("🔍 Debug Information (for troubleshooting)"):
+                                st.code(debug_output)
+
+                        st.rerun()
+                    except Exception as e:
+                        sys.stdout = old_stdout
+                        st.error(f"Error loading data: {e}")
+                        st.exception(e)
 
     # Display data if loaded
     if st.session_state.data:
@@ -193,9 +248,28 @@ else:
         print(f"DASHBOARD DEBUG: total_claims={totals.get('total_claims')}, total_value={totals.get('total_estimated_value')}")
         print(f"DASHBOARD DEBUG: clients_cum={portfolio.get('unique_clients_cumulative')}, lenders={len(lenders)}")
 
-        # Get Priority Deed rules and calculate financials
-        priority_deed = read_priority_deed_rules()
-        financials = calculate_financial_projections(totals, costs, priority_deed)
+        # Calculate financials using 20-80 split (Milberg 20% / Funder 80%)
+        total_settlement = totals.get('total_estimated_value', 0)
+        total_costs = costs.get('total_costs', 0)
+        dba_rate = 0.30  # 30% DBA rate
+        funder_pct = 0.80  # Funder gets 80%
+        firm_pct = 0.20  # Milberg gets 20%
+
+        dba_proceeds = total_settlement * dba_rate
+        net_proceeds = dba_proceeds - total_costs
+        funder_return = net_proceeds * funder_pct if net_proceeds > 0 else 0
+        firm_return = net_proceeds * firm_pct if net_proceeds > 0 else 0
+
+        financials = {
+            'total_settlement': total_settlement,
+            'dba_proceeds': dba_proceeds,
+            'total_costs': total_costs,
+            'net_proceeds': net_proceeds,
+            'funder_return': funder_return,
+            'firm_return': firm_return,
+            'roi': (funder_return / total_costs * 100) if total_costs > 0 else 0,
+            'moic': (funder_return / total_costs) if total_costs > 0 else 0
+        }
 
         st.markdown("---")
 
@@ -302,19 +376,19 @@ else:
         col1, col2, col3, col4, col5 = st.columns(5)
 
         with col1:
-            st.metric("Total Claims", f"{totals['total_claims']:,}")
+            st.metric("Total Claims", f"{totals.get('total_claims', 0):,}")
 
         with col2:
-            st.metric("Total Clients", f"{portfolio['unique_clients_cumulative']:,}")
+            st.metric("Total Clients", f"{portfolio.get('unique_clients_cumulative', 0):,}")
 
         with col3:
             st.metric("Lenders", f"{len(lenders)}")
 
         with col4:
-            st.metric("Portfolio Value", f"£{totals['total_estimated_value']/1000:.0f}K")
+            st.metric("Portfolio Value", f"£{totals.get('total_estimated_value', 0)/1000:.0f}K")
 
         with col5:
-            st.metric("Funder Return", f"£{financials['funder_return']/1000:.1f}K")
+            st.metric("Funder Return (80%)", f"£{financials['funder_return']/1000:.1f}K")
 
         st.markdown("---")
 
@@ -499,7 +573,7 @@ else:
             col1, col2, col3 = st.columns(3)
 
             with col1:
-                st.metric("Total Settlement Value", f"£{financials['total_settlement_value']:,.2f}")
+                st.metric("Total Settlement Value", f"£{financials['total_settlement']:,.2f}")
                 st.caption("Estimated portfolio value")
 
             with col2:
@@ -512,6 +586,34 @@ else:
 
             st.markdown("---")
 
+            # NUMERIC DATA TABLE - Economic Summary
+            st.subheader("📊 Financial Summary Table")
+            financial_table = pd.DataFrame({
+                'Metric': [
+                    'Total Settlement Value',
+                    'DBA Proceeds (30%)',
+                    'Total Costs Incurred',
+                    'Net Proceeds After Costs',
+                    'Funder Return (80%)',
+                    'Milberg Return (20%)',
+                    'ROI',
+                    'MOIC'
+                ],
+                'Value': [
+                    f"£{financials['total_settlement']:,.2f}",
+                    f"£{financials['dba_proceeds']:,.2f}",
+                    f"£{financials['total_costs']:,.2f}",
+                    f"£{financials['net_proceeds']:,.2f}",
+                    f"£{financials['funder_return']:,.2f}",
+                    f"£{financials['firm_return']:,.2f}",
+                    f"{financials['roi']:.1f}%",
+                    f"{financials['moic']:.2f}x"
+                ]
+            })
+            st.dataframe(financial_table, use_container_width=True, hide_index=True)
+
+            st.markdown("---")
+
             # Waterfall Chart
             st.subheader("Financial Waterfall Analysis")
 
@@ -519,15 +621,15 @@ else:
                 name="Cash Flow",
                 orientation="v",
                 measure=["absolute", "relative", "relative", "total"],
-                x=["Settlement Value", f"DBA Fee ({priority_deed['dba_rate']}%)", "Less: Costs", "Net Proceeds"],
+                x=["Settlement Value", "DBA Fee (30%)", "Less: Costs", "Net Proceeds"],
                 y=[
-                    financials['total_settlement_value'],
-                    financials['dba_proceeds'] - financials['total_settlement_value'],
+                    financials['total_settlement'],
+                    financials['dba_proceeds'] - financials['total_settlement'],
                     -financials['total_costs'],
                     financials['net_proceeds']
                 ],
                 text=[
-                    f"£{financials['total_settlement_value']:,.0f}",
+                    f"£{financials['total_settlement']:,.0f}",
                     f"£{financials['dba_proceeds']:,.0f}",
                     f"-£{financials['total_costs']:,.0f}",
                     f"£{financials['net_proceeds']:,.0f}"
@@ -557,10 +659,7 @@ else:
 
                 # Profit split pie chart
                 fig_split = go.Figure(data=[go.Pie(
-                    labels=[
-                        f'Funder ({priority_deed["funder_percentage"]}%)',
-                        f'Law Firm ({priority_deed["firm_percentage"]}%)'
-                    ],
+                    labels=['Funder (80%)', 'Milberg (20%)'],
                     values=[financials['funder_return'], financials['firm_return']],
                     hole=0.4,
                     marker_colors=['#3498db', '#2ecc71'],
@@ -584,10 +683,10 @@ else:
 
                 st.plotly_chart(fig_split, use_container_width=True)
 
-                st.info(f"""
+                st.info("""
                 **Priority Deed Terms:**
-                - DBA Rate: {priority_deed['dba_rate']}% of settlements
-                - Split: {priority_deed['funder_percentage']}/{priority_deed['firm_percentage']} after costs
+                - DBA Rate: 30% of settlements
+                - Split: 80/20 (Funder/Milberg) after costs
                 - Cost recovery: First priority
                 """)
 
@@ -596,7 +695,7 @@ else:
 
                 # ROI and MOIC
                 metrics_df = pd.DataFrame({
-                    'Metric': ['Funder Return', 'Firm Return', 'ROI', 'MOIC'],
+                    'Metric': ['Funder Return', 'Milberg Return', 'ROI', 'MOIC'],
                     'Value': [
                         f"£{financials['funder_return']:,.2f}",
                         f"£{financials['firm_return']:,.2f}",
@@ -655,13 +754,19 @@ else:
             # Pipeline Overview
             st.subheader("Claims Pipeline by Stage")
 
+            # Safe access to pipeline data with defaults
+            def get_pipeline_stage(stage_name):
+                stage = pipeline.get(stage_name, {})
+                return {'count': stage.get('count', 0), 'value': stage.get('value', 0)}
+
             pipeline_data = pd.DataFrame([
-                {'Stage': 'Awaiting DSAR', 'Count': pipeline['awaiting_dsar']['count'], 'Value': pipeline['awaiting_dsar']['value']},
-                {'Stage': 'Pending Submission', 'Count': pipeline['pending_submission']['count'], 'Value': pipeline['pending_submission']['value']},
-                {'Stage': 'Under Review', 'Count': pipeline['under_review']['count'], 'Value': pipeline['under_review']['value']},
-                {'Stage': 'Settlement Offered', 'Count': pipeline['settlement_offered']['count'], 'Value': pipeline['settlement_offered']['value']},
-                {'Stage': 'Paid', 'Count': pipeline['paid']['count'], 'Value': pipeline['paid']['value']}
+                {'Stage': 'Awaiting DSAR', **get_pipeline_stage('awaiting_dsar')},
+                {'Stage': 'Pending Submission', **get_pipeline_stage('pending_submission')},
+                {'Stage': 'Under Review', **get_pipeline_stage('under_review')},
+                {'Stage': 'Settlement Offered', **get_pipeline_stage('settlement_offered')},
+                {'Stage': 'Paid', **get_pipeline_stage('paid')}
             ])
+            pipeline_data = pipeline_data.rename(columns={'count': 'Count', 'value': 'Value'})
 
             col1, col2 = st.columns([1, 1])
 
@@ -716,16 +821,44 @@ else:
             col1, col2, col3, col4 = st.columns(4)
 
             with col1:
-                st.metric("Current Month Claims", portfolio['unique_claims_current'])
+                st.metric("Total Claims", totals.get('total_claims', 0))
 
             with col2:
-                st.metric("Current Month Clients", portfolio['unique_clients_current'])
+                st.metric("Total Clients", portfolio.get('unique_clients_cumulative', 0))
 
             with col3:
-                st.metric("Cumulative Claims", portfolio['unique_claims_cumulative'])
+                st.metric("Success Rate", f"{portfolio.get('success_rate', 0):.1f}%")
 
             with col4:
-                st.metric("Cumulative Clients", portfolio['unique_clients_cumulative'])
+                st.metric("Total Lenders", len(lenders))
+
+            # NUMERIC DATA TABLE - Portfolio Summary
+            st.subheader("📊 Portfolio Summary Table")
+            portfolio_table = pd.DataFrame({
+                'Metric': [
+                    'Total Claims',
+                    'Total Clients',
+                    'Total Lenders',
+                    'Total Portfolio Value',
+                    'Claims Submitted',
+                    'Claims Successful',
+                    'Claims Rejected',
+                    'Average Claim Value',
+                    'Success Rate'
+                ],
+                'Value': [
+                    f"{totals.get('total_claims', 0):,}",
+                    f"{portfolio.get('unique_clients_cumulative', 0):,}",
+                    f"{len(lenders):,}",
+                    f"£{totals.get('total_estimated_value', 0):,.2f}",
+                    f"{portfolio.get('claims_submitted', 0):,}",
+                    f"{portfolio.get('claims_successful', 0):,}",
+                    f"{portfolio.get('claims_rejected', 0):,}",
+                    f"£{portfolio.get('avg_claim_value', 0):,.2f}",
+                    f"{portfolio.get('success_rate', 0):.1f}%"
+                ]
+            })
+            st.dataframe(portfolio_table, use_container_width=True, hide_index=True)
 
         # ==================== TAB 4: PORTFOLIO ANALYSIS ====================
         with tab4:

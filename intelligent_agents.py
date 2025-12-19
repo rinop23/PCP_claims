@@ -425,10 +425,10 @@ class InvestorReportAgent(BaseAgent):
         if total_settlement == 0 and lenders:
             total_settlement = sum(l.get('estimated_value', 0) for l in lenders)
 
-        # Get profit split rules
-        dba_rate = 30  # Default 30%
-        funder_pct = 80  # Default 80%
-        firm_pct = 20  # Default 20%
+        # Get profit split rules (Milberg 20% / Funder 80% of net proceeds after costs)
+        dba_rate = 30  # Default 30% DBA rate on settlements
+        funder_pct = 80  # Funder gets 80%
+        firm_pct = 20  # Milberg (Law Firm) gets 20%
 
         if profit_rules:
             dba_info = profit_rules.get('dba_rate', {})
