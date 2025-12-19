@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Streamlit Community Cloud runs this after installing pip requirements.
+# Goal: ensure a Chrome/Chromium binary exists for Plotly/Kaleido static image export.
+
+echo "[postBuild] whoami: $(whoami)"
+echo "[postBuild] pwd: $(pwd)"
+
+echo "[postBuild] chrome: $(command -v google-chrome || true)"
+echo "[postBuild] chromium: $(command -v chromium || true)"
+
+echo "[postBuild] plotly_get_chrome: $(command -v plotly_get_chrome || true)"
+
+if command -v plotly_get_chrome >/dev/null 2>&1; then
+  plotly_get_chrome || true
+fi
+
+echo "[postBuild] chrome after: $(command -v google-chrome || true)"
