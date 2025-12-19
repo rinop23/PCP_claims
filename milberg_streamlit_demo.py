@@ -183,6 +183,16 @@ else:
         pipeline = data.get('pipeline', {})
         totals = data.get('portfolio_totals', {'total_claims': 0, 'total_estimated_value': 0})
 
+        # Fallback calculations if totals are missing but lenders exist
+        if totals.get('total_claims', 0) == 0 and lenders:
+            totals['total_claims'] = sum(l.get('num_claims', 0) for l in lenders)
+        if totals.get('total_estimated_value', 0) == 0 and lenders:
+            totals['total_estimated_value'] = sum(l.get('estimated_value', 0) for l in lenders)
+
+        # Debug info for troubleshooting
+        print(f"DASHBOARD DEBUG: total_claims={totals.get('total_claims')}, total_value={totals.get('total_estimated_value')}")
+        print(f"DASHBOARD DEBUG: clients_cum={portfolio.get('unique_clients_cumulative')}, lenders={len(lenders)}")
+
         # Get Priority Deed rules and calculate financials
         priority_deed = read_priority_deed_rules()
         financials = calculate_financial_projections(totals, costs, priority_deed)
