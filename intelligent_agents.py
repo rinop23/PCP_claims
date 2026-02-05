@@ -353,28 +353,52 @@ class MonthlyReportAgent(BaseAgent):
 
         print("[Monthly Report Agent] Analyzing Excel report...")
 
-        # Read Excel file
+        # Read Excel file - main data from first sheet
         xl = pd.ExcelFile(file_path)
         sheet_name = xl.sheet_names[0]
         df = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
         excel_text = df.to_string()
 
+        # Read lender distribution from second sheet "Lender Distribution Summary"
+        lender_sheet_name = "Lender Distribution Summary"
+        lender_excel_text = ""
+        if lender_sheet_name in xl.sheet_names:
+            df_lenders = pd.read_excel(file_path, sheet_name=lender_sheet_name, header=None)
+            lender_excel_text = df_lenders.to_string()
+            print(f"[Monthly Report Agent] Found lender data in sheet: {lender_sheet_name}")
+        else:
+            print(f"[Monthly Report Agent] Warning: Sheet '{lender_sheet_name}' not found, using first sheet for lenders")
+
         # Truncate if too long
-        if len(excel_text) > 25000:
-            excel_text = excel_text[:25000] + "\n... [truncated]"
+        if len(excel_text) > 20000:
+            excel_text = excel_text[:20000] + "\n... [truncated]"
+        if len(lender_excel_text) > 15000:
+            lender_excel_text = lender_excel_text[:15000] + "\n... [truncated]"
 
         system_prompt = """You are a financial data analyst. Extract ALL data from monthly reports.
 Return structured JSON with complete data - do NOT skip any lenders or data points.
 IMPORTANT: Use CUMULATIVE values (not current month) for total counts."""
 
+        # Build the lender section for the prompt
+        lender_section = ""
+        if lender_excel_text:
+            lender_section = f"""
+
+=== LENDER DISTRIBUTION DATA (from "Lender Distribution Summary" sheet) ===
+{lender_excel_text}
+=== END LENDER DATA ===
+"""
+
         user_prompt = f"""Analyze this monthly Excel report and extract ALL data:
 
+=== MAIN REPORT DATA ===
 {excel_text}
-
+=== END MAIN REPORT ===
+{lender_section}
 IMPORTANT INSTRUCTIONS:
 1. For portfolio metrics, use the CUMULATIVE column values (not Current Month)
 2. The "Grand Summary" row contains the total claims and total estimated value
-3. Extract ALL lenders from the Defendant table (typically 60-80 lenders)
+3. Extract ALL lenders from the "Lender Distribution Summary" sheet data provided above
 4. The total estimated value is typically around 228,900 for this report
 
 Extract and return JSON with:
