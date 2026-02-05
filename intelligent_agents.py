@@ -1608,6 +1608,15 @@ def build_investor_report_pptx(
         prs = Presentation()
         print("[PowerPoint] Creating new presentation (template not found)")
 
+    # Debug: log what data we received
+    print(f"[PowerPoint] investor_report keys: {list(investor_report.keys()) if investor_report else 'EMPTY'}")
+    print(f"[PowerPoint] monthly_data keys: {list(monthly_data.keys()) if monthly_data else 'EMPTY'}")
+    if monthly_data:
+        lenders_count = len(monthly_data.get('lender_distribution', []))
+        print(f"[PowerPoint] lenders count: {lenders_count}")
+        pm = monthly_data.get('portfolio_metrics', {})
+        print(f"[PowerPoint] portfolio_metrics: claims={pm.get('unique_claims')}, clients={pm.get('unique_clients')}")
+
     # Helper functions
     def _fmt_currency(v):
         if v is None or v == "N/A":
