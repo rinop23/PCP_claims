@@ -1924,79 +1924,107 @@ def generate_full_investor_report(excel_path: str) -> Dict[str, Any]:
     """
     Main orchestration function - coordinates all agents to generate investor report
     """
+    import traceback
+
     print("="*80)
-    print("INTELLIGENT MULTI-AGENT SYSTEM")
+    print("INTELLIGENT MULTI-AGENT SYSTEM - STARTING")
+    print(f"Excel path: {excel_path}")
     print("="*80)
 
-    # Initialize all agents
-    priority_deed_agent = PriorityDeedAgent()
-    fca_agent = FCAComplianceAgent()
-    monthly_agent = MonthlyReportAgent()
-    investor_agent = InvestorReportAgent()
-
-    # Step 1: Priority Deed Agent reads profit distribution rules
-    profit_rules = priority_deed_agent.read_priority_deed()
-
-    # Step 2: FCA Agent reads compliance requirements
-    compliance_rules = fca_agent.read_fca_scheme()
-
-    # Step 3: Monthly Report Agent extracts data from Excel
-    monthly_data = monthly_agent.analyze_monthly_report(excel_path)
-
-    # Step 4: Investor Report Agent generates comprehensive report
-    report = investor_agent.generate_investor_report(
-        monthly_data=monthly_data,
-        profit_rules=profit_rules,
-        compliance_rules=compliance_rules
-    )
-
-    # Build reports on disk
-    os.makedirs("reports", exist_ok=True)
-    period = (monthly_data or {}).get("reporting_period") or "Report"
-    safe_period = str(period).replace("/", "-").replace("\\", "-").replace(":", "-")
-
-    # Build DOCX report
-    docx_path = os.path.join("reports", f"Investor_Report_{safe_period}.docx")
     try:
-        build_investor_report_docx(
-            out_path=docx_path,
-            narrative=report.get("narrative") or "",
+        # Initialize all agents
+        print("[Step 0] Initializing agents...")
+        priority_deed_agent = PriorityDeedAgent()
+        fca_agent = FCAComplianceAgent()
+        monthly_agent = MonthlyReportAgent()
+        investor_agent = InvestorReportAgent()
+        print("[Step 0] Agents initialized successfully")
+
+        # Step 1: Priority Deed Agent reads profit distribution rules
+        print("[Step 1] Reading Priority Deed...")
+        profit_rules = priority_deed_agent.read_priority_deed()
+        print(f"[Step 1] Complete - profit_rules keys: {list(profit_rules.keys()) if profit_rules else 'NONE'}")
+
+        # Step 2: FCA Agent reads compliance requirements
+        print("[Step 2] Reading FCA Redress Scheme...")
+        compliance_rules = fca_agent.read_fca_scheme()
+        print(f"[Step 2] Complete - compliance_rules keys: {list(compliance_rules.keys()) if compliance_rules else 'NONE'}")
+
+        # Step 3: Monthly Report Agent extracts data from Excel
+        print("[Step 3] Analyzing monthly report...")
+        monthly_data = monthly_agent.analyze_monthly_report(excel_path)
+        print(f"[Step 3] Complete - monthly_data keys: {list(monthly_data.keys()) if monthly_data else 'NONE'}")
+
+        # Step 4: Investor Report Agent generates comprehensive report
+        print("[Step 4] Generating investor report...")
+        report = investor_agent.generate_investor_report(
             monthly_data=monthly_data,
-            investor_report=report.get("report_data") or {},
+            profit_rules=profit_rules,
+            compliance_rules=compliance_rules
         )
-    except Exception as e:
-        print(f"Warning: DOCX report generation failed: {e}")
-        docx_path = None
+        print(f"[Step 4] Complete - report keys: {list(report.keys()) if report else 'NONE'}")
 
-    # Build PowerPoint report
-    pptx_path = os.path.join("reports", f"Investor_Report_{safe_period}.pptx")
-    try:
-        if PPTX_AVAILABLE:
-            build_investor_report_pptx(
-                out_path=pptx_path,
+        # Build reports on disk
+        print("[Step 5] Building report files...")
+        os.makedirs("reports", exist_ok=True)
+        period = (monthly_data or {}).get("reporting_period") or "Report"
+        safe_period = str(period).replace("/", "-").replace("\\", "-").replace(":", "-")
+
+        # Build DOCX report
+        docx_path = os.path.join("reports", f"Investor_Report_{safe_period}.docx")
+        try:
+            print("[Step 5a] Building DOCX report...")
+            build_investor_report_docx(
+                out_path=docx_path,
+                narrative=report.get("narrative") or "",
                 monthly_data=monthly_data,
                 investor_report=report.get("report_data") or {},
             )
-        else:
-            print("Warning: python-pptx not available, skipping PowerPoint generation")
+            print(f"[Step 5a] DOCX complete: {docx_path}")
+        except Exception as e:
+            print(f"Warning: DOCX report generation failed: {e}")
+            traceback.print_exc()
+            docx_path = None
+
+        # Build PowerPoint report
+        pptx_path = os.path.join("reports", f"Investor_Report_{safe_period}.pptx")
+        try:
+            print("[Step 5b] Building PowerPoint report...")
+            if PPTX_AVAILABLE:
+                build_investor_report_pptx(
+                    out_path=pptx_path,
+                    monthly_data=monthly_data,
+                    investor_report=report.get("report_data") or {},
+                )
+                print(f"[Step 5b] PowerPoint complete: {pptx_path}")
+            else:
+                print("Warning: python-pptx not available, skipping PowerPoint generation")
+                pptx_path = None
+        except Exception as e:
+            print(f"Warning: PowerPoint report generation failed: {e}")
+            traceback.print_exc()
             pptx_path = None
+
+        print("="*80)
+        print("[OK] REPORT GENERATION COMPLETE")
+        print("="*80)
+
+        return {
+            "monthly_data": monthly_data,
+            "profit_rules": profit_rules,
+            "compliance_rules": compliance_rules,
+            "investor_report": report["report_data"],
+            "markdown_report": report["markdown_report"],
+            "docx_report_path": docx_path,
+            "pptx_report_path": pptx_path,
+        }
+
     except Exception as e:
-        print(f"Warning: PowerPoint report generation failed: {e}")
-        pptx_path = None
-
-    print("="*80)
-    print("[OK] REPORT GENERATION COMPLETE")
-    print("="*80)
-
-    return {
-        "monthly_data": monthly_data,
-        "profit_rules": profit_rules,
-        "compliance_rules": compliance_rules,
-        "investor_report": report["report_data"],
-        "markdown_report": report["markdown_report"],
-        "docx_report_path": docx_path,
-        "pptx_report_path": pptx_path,
-    }
+        print("="*80)
+        print(f"[FATAL ERROR] Report generation failed: {e}")
+        print("="*80)
+        traceback.print_exc()
+        raise
 
 
 if __name__ == "__main__":
