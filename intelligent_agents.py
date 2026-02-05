@@ -1644,18 +1644,37 @@ def build_investor_report_pptx(
 
     def add_title_slide(title: str, subtitle: str):
         """Add a title slide"""
-        slide_layout = prs.slide_layouts[0]  # Title Slide
+        try:
+            slide_layout = prs.slide_layouts[0]  # Title Slide
+        except (IndexError, KeyError):
+            slide_layout = prs.slide_layouts[0] if len(prs.slide_layouts) > 0 else None
+        if slide_layout is None:
+            print("[PowerPoint] ERROR: No slide layouts available")
+            return None
         slide = prs.slides.add_slide(slide_layout)
-        slide.shapes.title.text = title
+        if slide.shapes.title:
+            slide.shapes.title.text = title
         if len(slide.placeholders) > 1:
             slide.placeholders[1].text = subtitle
+        print(f"[PowerPoint] Added title slide: {title}")
         return slide
 
     def add_content_slide(title: str):
         """Add a content slide with title"""
-        slide_layout = prs.slide_layouts[5]  # Title Only
+        # Try layout 5 (Title Only), fall back to layout 6 (Blank), then layout 0
+        layout_idx = 5
+        if len(prs.slide_layouts) <= 5:
+            layout_idx = min(6, len(prs.slide_layouts) - 1)
+        if layout_idx < 0:
+            layout_idx = 0
+        try:
+            slide_layout = prs.slide_layouts[layout_idx]
+        except (IndexError, KeyError):
+            slide_layout = prs.slide_layouts[0]
         slide = prs.slides.add_slide(slide_layout)
-        slide.shapes.title.text = title
+        if slide.shapes.title:
+            slide.shapes.title.text = title
+        print(f"[PowerPoint] Added content slide: {title} (layout {layout_idx})")
         return slide
 
     def add_table_to_slide(slide, headers: List[str], rows: List[List[str]],
