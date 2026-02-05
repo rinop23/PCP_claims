@@ -442,12 +442,10 @@ else:
 
         st.markdown("---")
 
-        # KPI Dashboard - Split Funder Return into LP (80%) and GP (20%)
-        # The DBA proceeds are split 80/20 between Funder (LP) and Milberg (GP)
+        # KPI Dashboard - Show LP Return (Funder gets 80% of DBA proceeds)
         lp_return = financials['funder_return']  # 80% of DBA proceeds
-        gp_return = financials['firm_return']    # 20% of DBA proceeds
 
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
+        col1, col2, col3, col4, col5 = st.columns(5)
 
         with col1:
             st.metric("Total Claims", f"{totals.get('total_claims', 0):,}")
@@ -463,9 +461,6 @@ else:
 
         with col5:
             st.metric("LP Return (80%)", f"£{lp_return/1000:.1f}K")
-
-        with col6:
-            st.metric("GP Return (20%)", f"£{gp_return/1000:.1f}K")
 
         st.markdown("---")
 
@@ -671,7 +666,6 @@ else:
                     'DBA Proceeds (30%)',
                     'Total Costs Incurred',
                     'LP Return (80% of DBA)',
-                    'GP Return (20% of DBA)',
                     'ROI',
                     'MOIC'
                 ],
@@ -680,7 +674,6 @@ else:
                     f"£{financials['dba_proceeds']:,.2f}",
                     f"£{financials['total_costs']:,.2f}",
                     f"£{financials['funder_return']:,.2f}",
-                    f"£{financials['firm_return']:,.2f}",
                     f"{financials['roi']:.1f}%",
                     f"{financials['moic']:.2f}x"
                 ]
@@ -730,30 +723,24 @@ else:
             col1, col2 = st.columns([1, 1])
 
             with col1:
-                st.subheader("Profit Distribution (Priority Deed)")
+                st.subheader("LP Return (Priority Deed)")
 
-                # Profit split pie chart - LP (Funder) and GP (Milberg)
-                fig_split = go.Figure(data=[go.Pie(
-                    labels=['LP (80%)', 'GP (20%)'],
-                    values=[financials['funder_return'], financials['firm_return']],
-                    hole=0.4,
-                    marker_colors=['#3498db', '#2ecc71'],
+                # Bar chart showing LP Return from DBA Proceeds
+                fig_split = go.Figure(data=[go.Bar(
+                    x=['DBA Proceeds', 'LP Return (80%)'],
+                    y=[financials['dba_proceeds'], financials['funder_return']],
+                    marker_color=['#95a5a6', '#3498db'],
                     text=[
-                        f"£{financials['funder_return']:,.0f}",
-                        f"£{financials['firm_return']:,.0f}"
+                        f"£{financials['dba_proceeds']:,.0f}",
+                        f"£{financials['funder_return']:,.0f}"
                     ],
-                    textinfo='label+text',
-                    textposition='inside'
+                    textposition='outside'
                 )])
 
                 fig_split.update_layout(
                     height=400,
-                    annotations=[dict(
-                        text=f'DBA Proceeds<br>£{financials["dba_proceeds"]:,.0f}',
-                        x=0.5, y=0.5,
-                        font_size=14,
-                        showarrow=False
-                    )]
+                    yaxis_title="Value (£)",
+                    showlegend=False
                 )
 
                 st.plotly_chart(fig_split, use_container_width=True)
@@ -761,26 +748,23 @@ else:
                 st.info("""
                 **Priority Deed Terms:**
                 - DBA Rate: 30% of settlements
-                - Split: 80/20 (LP/GP) on GROSS DBA proceeds
-                - LP = Limited Partner (Funder), GP = General Partner (Milberg)
+                - LP receives 80% of DBA proceeds
                 - Costs paid separately by LP
                 """)
 
             with col2:
                 st.subheader("Performance Metrics")
 
-                # ROI and MOIC with LP/GP terminology
+                # ROI and MOIC metrics
                 metrics_df = pd.DataFrame({
-                    'Metric': ['LP Return', 'GP Return', 'ROI', 'MOIC'],
+                    'Metric': ['LP Return', 'ROI', 'MOIC'],
                     'Value': [
                         f"£{financials['funder_return']:,.2f}",
-                        f"£{financials['firm_return']:,.2f}",
                         f"{financials['roi']:.1f}%",
                         f"{financials['moic']:.2f}x"
                     ],
                     'Description': [
-                        '80% of GROSS DBA proceeds (Funder)',
-                        '20% of GROSS DBA proceeds (Milberg)',
+                        '80% of DBA proceeds (Funder)',
                         'Return on Investment',
                         'Multiple on Invested Capital'
                     ]

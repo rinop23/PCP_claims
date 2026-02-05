@@ -836,9 +836,8 @@ IMPORTANT:
 ### Costs
 - **Total Costs Incurred:** {_gbp(fin.get('total_costs_incurred'))}
 
-### Profit Distribution (80/20 split on GROSS DBA)
-- **LP Return (80%):** {_gbp(fin.get('funder_expected_return'))}
-- **GP Return (20%):** {_gbp(fin.get('firm_expected_return'))}
+### Profit Distribution
+- **LP Return (80% of DBA):** {_gbp(fin.get('funder_expected_return'))}
 
 ### Performance Metrics
 - **ROI Projection:** {_pct(fin.get('roi_projection'))}
@@ -1050,25 +1049,27 @@ def _build_dashboard_figures(monthly_data: Dict[str, Any], report_data: Dict[str
             fig_fin.update_layout(showlegend=False, xaxis_title="", yaxis_title="Value")
             figs["economic_summary"] = _style(fig_fin, height=520)
 
-            # Profit split (funder vs firm) if provided
+            # LP Return chart (simplified - no GP)
             funder_ret = fin.get("funder_expected_return")
-            firm_ret = fin.get("firm_expected_return")
-            if funder_ret is not None or firm_ret is not None:
+            dba_proceeds = fin.get("dba_proceeds_expected")
+            if funder_ret is not None and dba_proceeds is not None:
                 df_split = pd.DataFrame(
                     [
-                        {"Recipient": "LP (80%)", "Value": float(funder_ret or 0)},
-                        {"Recipient": "GP (20%)", "Value": float(firm_ret or 0)},
+                        {"Category": "LP Return (80%)", "Value": float(funder_ret or 0)},
+                        {"Category": "DBA Proceeds", "Value": float(dba_proceeds or 0)},
                     ]
                 )
-                fig_split = px.pie(
+                fig_split = px.bar(
                     df_split,
-                    names="Recipient",
-                    values="Value",
-                    hole=0.45,
-                    color_discrete_sequence=["#3498db", "#2ecc71"],
+                    x="Category",
+                    y="Value",
+                    text=df_split["Value"].map(lambda v: f"£{v:,.0f}"),
+                    color="Category",
+                    color_discrete_sequence=["#3498db", "#95a5a6"],
                 )
-                fig_split.update_traces(textposition="inside", textinfo="percent+label")
-                fig_split.update_layout(title="Expected Profit Distribution")
+                fig_split.update_traces(textposition="outside")
+                fig_split.update_yaxes(tickformat=money_fmt)
+                fig_split.update_layout(title="LP Return from DBA Proceeds", showlegend=False)
                 figs["profit_split"] = _style(fig_split, height=520)
     except Exception:
         pass
@@ -1330,7 +1331,6 @@ def build_investor_report_docx(
             ["DBA Proceeds (30%)", _fmt_currency(fin.get("dba_proceeds_expected"))],
             ["Total Costs Incurred", _fmt_currency(fin.get("total_costs_incurred"))],
             ["LP Return (80% of DBA)", _fmt_currency(fin.get("funder_expected_return"))],
-            ["GP Return (20% of DBA)", _fmt_currency(fin.get("firm_expected_return"))],
             ["ROI Projection", _fmt_pct(fin.get("roi_projection"))],
             ["MOIC Projection", f"{fin.get('moic_projection', 0):.2f}x" if fin.get('moic_projection') else "N/A"],
         ]
@@ -1771,7 +1771,6 @@ def build_investor_report_pptx(
         ["Total Lenders", _fmt_num(len(lenders))],
         ["Portfolio Value", _fmt_currency(perf.get("total_portfolio_value") or pm.get("total_settlement_value", 0))],
         ["LP Return (80%)", _fmt_currency(fin.get("funder_expected_return"))],
-        ["GP Return (20%)", _fmt_currency(fin.get("firm_expected_return"))],
         ["MOIC", f"{fin.get('moic_projection', 0):.2f}x" if fin.get('moic_projection') else "N/A"],
         ["ROI", _fmt_pct(fin.get("roi_projection"))],
         ["Compliance Status", (comp.get("fca_compliance_status") or "N/A").upper()],
@@ -1797,7 +1796,6 @@ def build_investor_report_pptx(
         ["DBA Proceeds (30%)", _fmt_currency(fin.get("dba_proceeds_expected"))],
         ["Total Costs Incurred", _fmt_currency(fin.get("total_costs_incurred"))],
         ["LP Return (80% of DBA)", _fmt_currency(fin.get("funder_expected_return"))],
-        ["GP Return (20% of DBA)", _fmt_currency(fin.get("firm_expected_return"))],
         ["ROI Projection", _fmt_pct(fin.get("roi_projection"))],
         ["MOIC Projection", f"{fin.get('moic_projection', 0):.2f}x" if fin.get('moic_projection') else "N/A"],
     ]
