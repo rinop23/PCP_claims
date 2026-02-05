@@ -353,27 +353,35 @@ class MonthlyReportAgent(BaseAgent):
 
         print("[Monthly Report Agent] Analyzing Excel report...")
 
-        # Read Excel file - main data from first sheet
-        xl = pd.ExcelFile(file_path)
-        sheet_name = xl.sheet_names[0]
-        df = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
-        excel_text = df.to_string()
+        try:
+            # Read Excel file - main data from first sheet
+            xl = pd.ExcelFile(file_path)
+            sheet_name = xl.sheet_names[0]
+            df = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
+            excel_text = df.to_string()
+            print(f"[Monthly Report Agent] Main sheet '{sheet_name}' loaded: {len(excel_text)} chars")
 
-        # Read lender distribution from second sheet "Lender Distribution Summary"
-        lender_sheet_name = "Lender Distribution Summary"
-        lender_excel_text = ""
-        if lender_sheet_name in xl.sheet_names:
-            df_lenders = pd.read_excel(file_path, sheet_name=lender_sheet_name, header=None)
-            lender_excel_text = df_lenders.to_string()
-            print(f"[Monthly Report Agent] Found lender data in sheet: {lender_sheet_name}")
-        else:
-            print(f"[Monthly Report Agent] Warning: Sheet '{lender_sheet_name}' not found, using first sheet for lenders")
+            # Read lender distribution from second sheet "Lender Distribution Summary"
+            lender_sheet_name = "Lender Distribution Summary"
+            lender_excel_text = ""
+            if lender_sheet_name in xl.sheet_names:
+                df_lenders = pd.read_excel(file_path, sheet_name=lender_sheet_name, header=None)
+                lender_excel_text = df_lenders.to_string()
+                print(f"[Monthly Report Agent] Found lender data in sheet: {lender_sheet_name} ({len(lender_excel_text)} chars)")
+            else:
+                print(f"[Monthly Report Agent] Warning: Sheet '{lender_sheet_name}' not found, using first sheet for lenders")
 
-        # Truncate if too long
-        if len(excel_text) > 20000:
-            excel_text = excel_text[:20000] + "\n... [truncated]"
-        if len(lender_excel_text) > 15000:
-            lender_excel_text = lender_excel_text[:15000] + "\n... [truncated]"
+        except Exception as e:
+            print(f"[Monthly Report Agent] ERROR reading Excel: {e}")
+            raise
+
+        # Truncate to prevent memory/token issues - reduced limits for stability
+        if len(excel_text) > 12000:
+            excel_text = excel_text[:12000] + "\n... [truncated]"
+        if len(lender_excel_text) > 10000:
+            lender_excel_text = lender_excel_text[:10000] + "\n... [truncated]"
+
+        print(f"[Monthly Report Agent] Final text sizes - main: {len(excel_text)}, lenders: {len(lender_excel_text)}")
 
         system_prompt = """You are a financial data analyst. Extract ALL data from monthly reports.
 Return structured JSON with complete data - do NOT skip any lenders or data points.
